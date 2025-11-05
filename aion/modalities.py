@@ -8,6 +8,7 @@ from torch import Tensor
 __all__ = [
     "LegacySurveyImage",
     "HSCImage",
+    "EuclidImage",
     "DESISpectrum",
     "SDSSSpectrum",
     "LegacySurveyCatalog",
@@ -82,6 +83,13 @@ class LegacySurveyImage(Image):
     """Legacy Survey image modality data."""
 
     token_key: ClassVar[str] = "tok_image"
+    num_tokens: ClassVar[int] = 576
+
+
+class EuclidImage(Image):
+    """Euclid image modality data."""
+
+    token_key: ClassVar[str] = "tok_image_euclid"
     num_tokens: ClassVar[int] = 576
 
 

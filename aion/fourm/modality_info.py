@@ -51,6 +51,29 @@ MODALITY_INFO = {
         "id": generate_uint15_hash("tok_image_hsc"),
         "pretokenized": True,
     },
+    # Euclid modalities
+    "tok_image_euclid": {
+        "input_size": 96,
+        "patch_size": 4,
+        "vocab_size": 4375,
+        "encoder_embedding": partial(
+            ImageTokenEncoderEmbedding,
+            vocab_size=4375,
+            patch_size=4,
+            image_size=(96, 96),
+        ),
+        "decoder_embedding": partial(
+            ImageTokenDecoderEmbedding,
+            vocab_size=4375,
+            patch_size=4,
+            image_size=(96, 96),
+        ),
+        "min_tokens": 0,
+        "max_tokens": None,
+        "type": "img",
+        "id": generate_uint15_hash("tok_image_euclid"),
+        "pretokenized": True,
+    },
     "tok_mag_g": {
         "input_size": 1,
         "patch_size": 1,
@@ -746,6 +769,7 @@ MODALITY_TRANSFORMS = {
     "tok_shape_e1": TokTransform(),
     "tok_shape_e2": TokTransform(),
     "tok_image_hsc": TokTransform(),
+    "tok_image_euclid": TokTransform(),
     "tok_mag_g": TokTransform(),
     "tok_mag_r": TokTransform(),
     "tok_mag_i": TokTransform(),

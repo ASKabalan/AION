@@ -97,11 +97,21 @@ class RescaleToLegacySurvey:
         return 22.5 - 2.5 * torch.log10(scale)
 
     def forward(self, image, survey):
-        zpscale = self.convert_zeropoint(27.0) if survey == "HSC" else 1.0
+        if survey == "HSC":
+            zpscale = self.convert_zeropoint(27.0)
+        elif survey == "EUCLID":
+            zpscale =  self.convert_zeropoint(27.0) # SAME FOR NOW
+        else:
+            zpscale = 1.0
         image /= zpscale
         return image
 
     def backward(self, image, survey):
-        zpscale = self._reverse_zeropoint(27.0) if survey == "HSC" else 1.0
+        if survey == "HSC":
+            zpscale = self.reverse_zeropoint(27.0)
+        elif survey == "EUCLID":
+            zpscale = self.reverse_zeropoint(27.0) # SAME FOR NOW
+        else:
+            zpscale = 1.0
         image *= zpscale
         return image
