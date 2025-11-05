@@ -51,3 +51,26 @@ python -m scratch.analyze_embeddings --input /pbs/throng/training/astroinfo2025/
 --nn-figure nn_agreement.png \
 --nn-report nn_pairs.csv
 ```
+
+# Isolation forest
+
+```
+python -m scratch.detect_outliers \
+    --input /pbs/throng/training/astroinfo2025/work/maxime/data_all_tokens.pt \
+    --figure-hsc umap_hsc_outliers.png \
+    --figure-hsc-desi umap_hsc_desi_outliers.png \
+    --umap-csv umap_coords.csv \
+    --outliers-hsc outliers_hsc.csv \
+    --outliers-hsc-desi outliers_hsc_desi.csv \
+    --contamination 0.02
+```
+
+# Display outliers
+
+```
+python -m scratch.display_outlier_images \
+  --csv outliers_hsc.csv outliers_hsc_desi.csv \
+  --split all --max 12 --cols 4 \
+  --save outliers_grid.png --index euclid_index.csv
+```
+
