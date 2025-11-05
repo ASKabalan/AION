@@ -277,7 +277,7 @@ def compute_flux_distribution_pairs(
     pairs = [
         ("vis", "g"),  # Euclid VIS -> HSC g
         ("y",   "r"),  # NISP-Y   -> HSC r
-        ("j",   "y"),  # NISP-J   -> HSC y
+        ("j",   "i"),  # NISP-J   -> HSC y
         ("h",   "z"),  # NISP-H   -> HSC z
     ]
 

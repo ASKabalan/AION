@@ -1,13 +1,14 @@
 # load_display_data.py
 import argparse
 import os
+from random import sample
 import sys
 import warnings
 
 # Matplotlib en mode interactif par défaut ; on bascule en "Agg" si --no-gui est passé
 import matplotlib
 
-from typing import Optional
+from typing import Optional, Sequence
 
 def _maybe_switch_to_agg(no_gui: bool):
     if no_gui:
@@ -29,7 +30,7 @@ except Exception:
     Image = None
 
 try:
-    from datasets import load_dataset
+    from datasets import load_dataset, concatenate_datasets
 except ImportError as e:
     raise SystemExit(
         "Le paquet 'datasets' est requis. Installe-le avec: pip install datasets"
@@ -40,17 +41,72 @@ from torch.utils.data import DataLoader
 
 class EuclidDESIDataset(torch.utils.data.Dataset):
     """PyTorch Dataset wrapper for the Euclid+DESI HuggingFace dataset."""
-    def __init__(self, split="train_batch_1", transform=None,
-                 cache_dir="/pbs/throng/training/astroinfo2025/model/euclid_desi/hf_home/datasets"):
+    def __init__(
+        self,
+        split="train_batch_1",
+        transform=None,
+        cache_dir="/pbs/throng/training/astroinfo2025/model/euclid_desi/hf_home/datasets",
+        verbose: bool = False,
+    ):
         import os
         os.makedirs(cache_dir, exist_ok=True)
-        print(f"Loading dataset (split={split}) into cache_dir={cache_dir}")
-        self.dataset = load_dataset(
-            "msiudek/astroPT_euclid_desi_dataset",
-            split=split,
-            cache_dir=cache_dir
-        )
+        self.verbose = verbose
         self.transform = transform
+
+        requested_splits: list[str]
+        datasets_to_concat: list = []
+
+        if isinstance(split, str):
+            normalized = split.strip()
+            if normalized.lower() in {"all", "*"}:
+                dataset_dict = load_dataset(
+                    "msiudek/astroPT_euclid_desi_dataset",
+                    cache_dir=cache_dir,
+                )
+                requested_splits = list(dataset_dict.keys())
+                datasets_to_concat = [dataset_dict[name] for name in requested_splits]
+            else:
+                requested_splits = [part.strip() for part in normalized.split(",") if part.strip()]
+                if not requested_splits:
+                    raise ValueError("No valid split names provided")
+                for split_name in requested_splits:
+                    datasets_to_concat.append(
+                        load_dataset(
+                            "msiudek/astroPT_euclid_desi_dataset",
+                            split=split_name,
+                            cache_dir=cache_dir,
+                        )
+                    )
+        elif isinstance(split, Sequence):
+            requested_splits = [str(part) for part in split]
+            for split_name in requested_splits:
+                datasets_to_concat.append(
+                    load_dataset(
+                        "msiudek/astroPT_euclid_desi_dataset",
+                        split=split_name,
+                        cache_dir=cache_dir,
+                    )
+                )
+        else:
+            raise TypeError("split must be a string, list or tuple of split names")
+
+        if len(datasets_to_concat) == 1:
+            self.dataset = datasets_to_concat[0]
+        else:
+            self.dataset = concatenate_datasets(datasets_to_concat)
+
+        self.splits = requested_splits
+        if self.verbose:
+            per_split_sizes = {
+                name: len(ds)
+                for name, ds in zip(self.splits, datasets_to_concat)
+            }
+            print(
+                f"Loaded EuclidDESIDataset with splits={self.splits} total_samples={len(self.dataset)}"
+            )
+            print(f"Per-split sizes: {per_split_sizes}")
+            preview = [self.dataset[i]["object_id"] for i in range(min(3, len(self.dataset)))]
+            print(f"Object ID preview: {preview}")
 
     def __len__(self):
         return len(self.dataset)
@@ -79,15 +135,31 @@ class EuclidDESIDataset(torch.utils.data.Dataset):
                 # essaye de remettre en (C,H,W)
                 rgb_image_t = rgb_image_t.permute(2, 0, 1).contiguous()
 
-        # Process spectrum data
+# Process spectrum data
         spectrum_data = None
         if sample.get('spectrum') is not None:
+            if self.verbose:
+                print(f"Sample spectrum keys: {sample['spectrum'].keys()}")
             flux = sample['spectrum'].get('flux')
-            wavelength = sample['spectrum'].get('wavelength') if sample['spectrum'] is not None else None
+            wavelength = sample['spectrum'].get('wavelength')
+            error = sample['spectrum'].get('error')
+
+            flux = np.array(flux) if flux is not None else None
+            wavelength = np.array(wavelength) if wavelength is not None else None
+            error = np.array(error) if error is not None else None
+
+            ivar = 1.0 / (error ** 2) if error is not None else None
+
+            # mask not provided → make a "valid empty" boolean mask
+            mask = np.zeros_like(flux, dtype=bool) if flux is not None else None
+
             if flux is not None:
                 spectrum_data = {
-                    'flux': torch.from_numpy(np.array(flux)).float(),
-                    'wavelength': torch.from_numpy(np.array(wavelength)).float() if wavelength is not None else None
+                    'flux': torch.from_numpy(flux).float(),
+                    'wavelength': torch.from_numpy(wavelength).float() if wavelength is not None else None,
+                    'error': torch.from_numpy(error).float() if error is not None else None,
+                    'ivar': torch.from_numpy(ivar).float() if ivar is not None else None,
+                    'mask': torch.from_numpy(mask).bool() if mask is not None else None,
                 }
 
         # Process SED data
@@ -142,9 +214,9 @@ def display_one_sample(
 
     # Prépare la figure
     if show_bands:
-        fig, axes = plt.subplots(2, 3, figsize=(12, 8))
-        ax_rgb, ax_spec, ax_sed = axes[0]
-        ax_vis, ax_y, ax_j = axes[1]
+        fig, axes = plt.subplots(2, 4, figsize=(12, 8))
+        ax_rgb, ax_spec, ax_sed, _ = axes[0]
+        ax_vis, ax_y, ax_j, ax_h = axes[1]
     else:
         fig, ax_rgb = plt.subplots(figsize=(5, 5))
 
@@ -192,6 +264,7 @@ def display_one_sample(
             (ax_vis, sample.get('vis_image'), "VIS"),
             (ax_y, sample.get('nisp_y_image'), "NIR-Y"),
             (ax_j, sample.get('nisp_j_image'), "NIR-J"),
+            (ax_h, sample.get('nisp_h_image'), "NIR-H"),
         ]:
             if band_tensor is not None:
                 im = ax.imshow(band_tensor.numpy(), cmap="viridis")

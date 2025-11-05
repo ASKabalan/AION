@@ -2,7 +2,7 @@ from pathlib import Path
 
 import torch
 from aion.model import AION
-from codec_manager import LocalCodecManager
+from .codec_manager import LocalCodecManager
 
 DEFAULT_MODEL_DIR = Path(r"/pbs/throng/training/astroinfo2025/model")
 

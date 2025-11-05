@@ -23,8 +23,10 @@ def generate_embeddings(
     max_samples: int | None = None,
     output_path: str | Path | None = None,
     verbose: bool = False,
+    batch_size: int = 1,
+    keep_tokens: bool = False,
 ) -> list[dict]:
-    """Encode multiple Euclid+DESI samples and optionally persist their embeddings."""
+    """Encode multiple Euclid+DESI samples and optionally persist their embeddings (and tokens)."""
 
     if output_path is None:
         raise ValueError("output_path must be provided to save embeddings.")
@@ -37,8 +39,58 @@ def generate_embeddings(
     limit = total_dataset if max_samples is None else min(total_dataset, max_samples)
     indices: Iterable[int] = range(limit)
 
+    if batch_size <= 0:
+        raise ValueError("batch_size must be >= 1")
+
     results: list[dict] = []
     skipped = 0
+
+    batch_tokens_spec_image: list[dict[str, torch.Tensor]] = []
+    batch_tokens_image: list[dict[str, torch.Tensor]] = []
+    batch_metadata: list[tuple[str, float]] = []
+
+    def _concat_token_dicts(token_dicts: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
+        keys = list(token_dicts[0].keys())
+        return {k: torch.cat([d[k] for d in token_dicts], dim=0) for k in keys}
+
+    def _flush_batches() -> None:
+        nonlocal batch_tokens_spec_image, batch_tokens_image, batch_metadata
+        if not batch_metadata:
+            return
+
+        tokens_spec = _concat_token_dicts(batch_tokens_spec_image)
+        tokens_img = _concat_token_dicts(batch_tokens_image)
+
+        embedded_spec = model.encode(tokens_spec).mean(dim=1).cpu()
+        embedded_img = model.encode(tokens_img).mean(dim=1).cpu()
+
+        for idx_entry, ((object_id, redshift), emb_spec, emb_img) in enumerate(
+            zip(batch_metadata, embedded_spec, embedded_img)
+        ):
+            results.append(
+                {
+                    "object_id": object_id,
+                    "redshift": redshift,
+                    "embedding_hsc_desi": emb_spec,
+                    "embedding_hsc": emb_img,
+                }
+            )
+
+            if keep_tokens:
+                record = results[-1]
+                record["tokens_hsc_desi"] = {
+                    key: batch_tokens_spec_image[idx_entry][key].squeeze(0).detach().cpu()
+                    for key in batch_tokens_spec_image[idx_entry]
+                }
+                record["tokens_hsc"] = {
+                    key: batch_tokens_image[idx_entry][key].squeeze(0).detach().cpu()
+                    for key in batch_tokens_image[idx_entry]
+                }
+
+        batch_tokens_spec_image.clear()
+        batch_tokens_image.clear()
+        batch_metadata.clear()
+
     progress = tqdm(indices, total=limit, desc="Encoding", unit="obj", leave=False)
     for idx in progress:
         sample = dataset[idx]
@@ -72,25 +124,25 @@ def generate_embeddings(
         tokens_spec_image = codec_manager.encode(hsc_img, desi_spec)
         tokens_image = codec_manager.encode(hsc_img)
 
-        embeddings_spec_image = model.encode(tokens_spec_image).mean(dim=1)
-        embeddings_image = model.encode(tokens_image).mean(dim=1)
+        batch_tokens_spec_image.append(tokens_spec_image)
+        batch_tokens_image.append(tokens_image)
 
-        record = {
-            "object_id": object_id,
-            "redshift": redshift,
-            "embedding_hsc_desi": embeddings_spec_image.squeeze(0).cpu(),
-            "embedding_hsc": embeddings_image.squeeze(0).cpu(),
-        }
+        batch_metadata.append((object_id, redshift))
 
-        results.append(record)
+        if len(batch_metadata) >= batch_size:
+            _flush_batches()
 
+    _flush_batches()
     progress.close()
+
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(results, output_path)
     summary = f"Saved {len(results)} embeddings to {output_path}"
     if skipped:
         summary += f" (skipped {skipped})"
+    if keep_tokens:
+        summary += " with tokens"
     print(summary)
 
     return results
@@ -100,7 +152,12 @@ def main(argv=None):
     parser = argparse.ArgumentParser(
         description="Generate AION embeddings for multiple Euclid+DESI objects."
     )
-    parser.add_argument("--split", type=str, default="train_batch_1", help="Dataset split")
+    parser.add_argument(
+        "--split",
+        type=str,
+        default="train_batch_1",
+        help="Dataset split (comma-separated list or 'all' for every available split)",
+    )
     parser.add_argument(
         "--cache-dir",
         type=str,
@@ -112,6 +169,13 @@ def main(argv=None):
     parser.add_argument("--max-samples", type=int, default=None, help="Limit number of samples")
     parser.add_argument("--output", type=str, required=True, help="Path to save embeddings (.pt)")
     parser.add_argument("--verbose", action="store_true", default=False, help="Enable verbose logging")
+    parser.add_argument("--batch-size", type=int, default=1, help="Number of samples per model batch")
+    parser.add_argument(
+        "--keep-tokens",
+        action="store_true",
+        default=False,
+        help="Also store HSC-only and HSC+DESI token tensors for each object.",
+    )
 
     args = parser.parse_args(argv)
     generate_embeddings(
@@ -122,6 +186,8 @@ def main(argv=None):
         max_samples=args.max_samples,
         output_path=args.output,
         verbose=args.verbose,
+        batch_size=args.batch_size,
+        keep_tokens=args.keep_tokens,
     )
 
 
