@@ -34,3 +34,20 @@ python -m scratch.compute_flux_history --both --rescale --nsample 500
 --euclid-cache-dir /pbs/throng/training/astroinfo2025/model/euclid_desi/hf_home/datasets
  --save hsc_vs_euclid_flux_hist.png --no-gui
 ```
+
+# Generate embeddings on multiple datas
+
+```
+python -m scratch.generate_embeddings --output /pbs/throng/training/astroinfo2025/work/maxime/data_all_tokens.pt --batch-size 20 --split all --keep-tokens
+```
+
+
+# Analyse embeddings
+
+```
+python -m scratch.analyze_embeddings --input /pbs/throng/training/astroinfo2025/work/maxime/data_all_tokens.pt --figure umap.png \
+--cosine-figure cosine_hist.png \
+--cosine-redshift-figure cosine_vs_z.png \
+--nn-figure nn_agreement.png \
+--nn-report nn_pairs.csv
+```
