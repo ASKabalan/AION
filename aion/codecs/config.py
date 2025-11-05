@@ -19,6 +19,7 @@ from aion.modalities import (
     HSCAZ,
     Dec,
     DESISpectrum,
+    EuclidImage,
     GaiaFluxBp,
     GaiaFluxG,
     GaiaFluxRp,
@@ -82,6 +83,7 @@ class CodecHFConfig:
 MODALITY_CODEC_MAPPING = {
     Dec: ScalarCodec,
     DESISpectrum: SpectrumCodec,
+    EuclidImage: ImageCodec,
     GaiaFluxBp: LogScalarCodec,
     GaiaFluxG: LogScalarCodec,
     GaiaFluxRp: LogScalarCodec,

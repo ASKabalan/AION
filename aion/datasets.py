@@ -10,6 +10,11 @@ from tqdm import tqdm
 from aion.modalities import HSCImage, DESISpectrum, EuclidImage
 
 
+HSC_G_TO_EUCLID_VIS = (0.1312 , 0.01147)
+HSC_2_TO_EUCLID_H   = (0.02096 , 0.005976)
+HSC_Y_TO_EUCLID_J   = (0.03052 , -0.0003554)
+HSC_R_TO_EUCLID_Y = (0.008414 , 0.01346)
+
 class AIONDataset(ABC):
     def __init__(
         self,
@@ -111,6 +116,14 @@ class AIONDataset(ABC):
 
     def __len__(self) -> int:
         return len(self.samples)
+
+    def __getitem__(self, idx: int):
+        if idx < 0 or idx >= (len(self.samples) + self.batch_size - 1) // self.batch_size:
+            raise IndexError(f"Batch index {idx} out of range")
+        start_idx = idx * self.batch_size
+        end_idx = min(start_idx + self.batch_size, len(self.samples))
+        batch_samples = self.samples[start_idx:end_idx]
+        return self._convert_batch(batch_samples)
 
     def __iter__(self) -> Iterator:
         for i in range(0, len(self.samples), self.batch_size):
@@ -227,28 +240,36 @@ class EuclidDESIDataset(AIONDataset):
     def _get_split(self) -> str:
         return "train_batch_1"
 
-    def _convert_sample(self, sample: dict) -> Tuple[EuclidImage, DESISpectrum]:
-        vis_image = np.array(sample['VIS_image'])
-        nisp_y_image = np.array(sample['NISP_Y_image'])
-        nisp_j_image = np.array(sample['NISP_J_image'])
-        nisp_h_image = np.array(sample['NISP_H_image'])
+    def _convert_sample(self, sample: dict) -> Tuple[HSCImage, DESISpectrum]:
+        vis_image = np.array(sample['VIS_image']) * HSC_G_TO_EUCLID_VIS[0] + HSC_G_TO_EUCLID_VIS[1]
+        nisp_y_image = np.array(sample['NISP_Y_image']) * HSC_R_TO_EUCLID_Y[0] + HSC_R_TO_EUCLID_Y[1]
+        nisp_j_image = np.array(sample['NISP_J_image']) * HSC_Y_TO_EUCLID_J[0] + HSC_Y_TO_EUCLID_J[1]
+        nisp_h_image = np.array(sample['NISP_H_image']) * HSC_2_TO_EUCLID_H[0] + HSC_2_TO_EUCLID_H[1]
 
         euclid_flux = torch.tensor(
             np.stack([vis_image, nisp_y_image, nisp_j_image, nisp_h_image], axis=0),
             dtype=torch.float32
         )
 
-        euclid_image = EuclidImage(
+        euclid_as_hsc = HSCImage(
             flux=euclid_flux,
             bands=['EUCLID-VIS', 'EUCLID-Y', 'EUCLID-J', 'EUCLID-H']
+            #bands=['HSC-VIS', 'HSC-Y', 'HSC-J', 'HSC-H']
         )
 
         spectrum = sample['spectrum']
+        flux = np.array(spectrum['flux'])
+        error = np.array(spectrum['error'])
+        wavelength = np.array(spectrum['wavelength'])
+
+        ivar = np.where(error > 0, 1.0 / (error ** 2), 0.0)
+        mask = error > 0
+
         desi_spectrum = DESISpectrum(
-            flux=torch.tensor(np.array(spectrum['flux']), dtype=torch.float32),
-            ivar=torch.tensor(np.array(spectrum['ivar']), dtype=torch.float32),
-            wavelength=torch.tensor(np.array(spectrum['lambda']), dtype=torch.float32),
-            mask=torch.tensor(np.array(spectrum['mask']), dtype=torch.bool),
+            flux=torch.tensor(flux, dtype=torch.float32),
+            ivar=torch.tensor(ivar, dtype=torch.float32),
+            wavelength=torch.tensor(wavelength, dtype=torch.float32),
+            mask=torch.tensor(mask, dtype=torch.bool),
         )
 
-        return euclid_image, desi_spectrum
+        return euclid_as_hsc, desi_spectrum

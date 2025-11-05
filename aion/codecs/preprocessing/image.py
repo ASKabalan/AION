@@ -98,9 +98,9 @@ class RescaleToLegacySurvey:
 
     def forward(self, image, survey):
         if survey == "HSC":
-            zpscale = self.convert_zeropoint(27.0)
+            zpscale = self.convert_zeropoint(torch.tensor(27.0))
         elif survey == "EUCLID":
-            zpscale =  self.convert_zeropoint(27.0) # SAME FOR NOW
+            zpscale =  self.convert_zeropoint(torch.tensor(27.0)) # SAME FOR NOW
         else:
             zpscale = 1.0
         image /= zpscale
@@ -108,9 +108,9 @@ class RescaleToLegacySurvey:
 
     def backward(self, image, survey):
         if survey == "HSC":
-            zpscale = self.reverse_zeropoint(27.0)
+            zpscale = self.reverse_zeropoint(torch.tensor(27.0))
         elif survey == "EUCLID":
-            zpscale = self.reverse_zeropoint(27.0) # SAME FOR NOW
+            zpscale = self.reverse_zeropoint(torch.tensor(27.0)) # SAME FOR NOW
         else:
             zpscale = 1.0
         image *= zpscale
