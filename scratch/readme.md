@@ -112,3 +112,8 @@ python -m scratch.show_object_detail \
   --no-show \
   --output-dir object_details_batch
 ```
+# Lenses
+
+```
+python -m scratch.lens_catalog_visualization --lens-csv q1_discovery_engine_lens_catalog.csv --embeddings /pbs/throng/training/astroinfo2025/work/maxime/data_all_tokens_spectrums.pt --output-umap scratch/outputs/lens_umap.png --output-grid scratch/outputs/lens_spectrum_grid.png --index euclid_index.csv --max-grid-items 114
+```
