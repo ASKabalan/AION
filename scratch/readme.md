@@ -38,14 +38,14 @@ python -m scratch.compute_flux_history --both --rescale --nsample 500
 # Generate embeddings on multiple datas
 
 ```
-python -m scratch.generate_embeddings --output /pbs/throng/training/astroinfo2025/work/maxime/data_all_tokens.pt --batch-size 20 --split all --keep-tokens
+python -m scratch.generate_embeddings --output /pbs/throng/training/astroinfo2025/work/maxime/data_all_tokens_spectrums.pt --batch-size 20 --split all --keep-tokens
 ```
 
 
 # Analyse embeddings
 
 ```
-python -m scratch.analyze_embeddings --input /pbs/throng/training/astroinfo2025/work/maxime/data_all_tokens.pt --figure umap.png \
+python -m scratch.analyze_embeddings --input /pbs/throng/training/astroinfo2025/work/maxime/data_all_tokens_spectrums.pt --figure umap.png \
 --cosine-figure cosine_hist.png \
 --cosine-redshift-figure cosine_vs_z.png \
 --nn-figure nn_agreement.png \
@@ -56,7 +56,7 @@ python -m scratch.analyze_embeddings --input /pbs/throng/training/astroinfo2025/
 
 ```
 python -m scratch.detect_outliers \
-    --input /pbs/throng/training/astroinfo2025/work/maxime/data_all_tokens.pt \
+    --input /pbs/throng/training/astroinfo2025/work/maxime/data_all_tokens_spectrums.pt \
     --figure-hsc-desi umap_hsc_desi_outliers.png \
     --figure-hsc umap_hsc_outliers.png \
     --figure-spectrum umap_spectrum_outliers.png \
@@ -83,11 +83,32 @@ python -m scratch.display_outlier_images_spectrum \
   --save outliers_grid_with_spectra.png --index euclid_index.csv
 ```
 
+# Umap visualisation with thumbnails
+
 ```
 python -m scratch.visualize_embedding_umap \
-  --input /pbs/throng/training/astroinfo2025/work/maxime/data_all_tokens.pt \
+  --input /pbs/throng/training/astroinfo2025/work/maxime/data_all_tokens_spectrums.pt \
   --embedding-key embedding_hsc_desi \
   --figure embedding_umap_hsc_desi.png \
   --figure-spectrum embedding_umap_hsc_desi_spectra.png \
-  --index euclid_index.csv --grid-rows 12 --grid-cols 12
+  --index euclid_index.csv --grid-rows 20 --grid-cols 20 --dpi 50
+```
+
+# Inspect single object (spectrum + bands)
+
+```
+python -m scratch.show_object_detail \
+  --object-id 2668223716658856337 \
+  --index euclid_index.csv \
+  --smooth 7 \
+  --save object_detail.png
+```
+
+```
+python -m scratch.show_object_detail \
+  --csv outliers_intersection.csv \
+  --index euclid_index.csv \
+  --smooth 7 \
+  --no-show \
+  --output-dir object_details_batch
 ```
