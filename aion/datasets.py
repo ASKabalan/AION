@@ -72,7 +72,7 @@ class AIONDataset(ABC):
         if mode not in ["streaming", "local"]:
             raise ValueError(f"mode must be 'streaming' or 'local', got '{mode}'")
 
-        self.slice_dir = os.path.join(cache_dir, f"{self._dataset_name()}_slice")
+        self.slice_dir = os.path.join(cache_dir, f"{self._dataset_name()}_{split}")
         self.samples = None
         self._ensure_samples()
 
@@ -94,10 +94,11 @@ class AIONDataset(ABC):
     def _ensure_samples(self):
         if self.mode == "local":
             if not os.path.isdir(self.slice_dir):
-                raise FileNotFoundError(
-                    f"Local mode requires existing cache at {self.slice_dir}. "
-                    f"Use mode='streaming' first to download the dataset."
-                )
+                    ds_stream = load_dataset(
+                    self._repo_id(),
+                    cache_dir=os.path.join(self.cache_dir, self._dataset_name()),
+                    split=self._get_split(),
+            )
             try:
                 ds = load_from_disk(self.slice_dir)
                 self.samples = [ds[i] for i in range(len(ds))]
