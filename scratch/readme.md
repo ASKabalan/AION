@@ -67,6 +67,99 @@ python -m scratch.detect_outliers \
     --contamination 0.02
 ```
 
+# Normalizing-flow anomaly scores
+
+```
+python -m scratch.detect_outliers_NFs \
+    --input /pbs/throng/training/astroinfo2025/work/maxime/data_all_tokens_spectrums.pt \
+    --output-csv scratch/outputs/anomaly_scores.csv \
+    --epochs 250 --num-transforms 8 --hidden-features 256 \
+    --lr 1e-4 --grad-clip 5 --weight-decay 1e-5
+```
+
+Produces a per-embedding table of log-likelihoods, negative log-likelihoods, and `anomaly_sigma` scores (z-scores over the negative log-likelihood) for every object in the embedding file. Requires the `normflows` package (`pip install normflows`).
+
+# Visualise flow anomaly scores
+
+```
+python -m scratch.plot_anomaly_scores \
+    --embeddings /pbs/throng/training/astroinfo2025/work/maxime/data_all_tokens_spectrums.pt \
+    --scores-csv scratch/outputs/anomaly_scores.csv \
+    --output-dir scratch/outputs/anomaly_umaps \
+    --n-neighbors 30 --min-dist 0.05
+```
+
+# Select NF anomalies (intersection)
+
+```
+python -m scratch.select_nf_outliers \
+    --scores-csv scratch/outputs/anomaly_scores.csv \
+    --output scratch/outputs/outlier_NFS_intersection.csv \
+    --top-k 150 \
+    --intersect-with-isf outliers_hsc.csv outliers_hsc_desi.csv outliers_spectrum.csv
+```
+
+Produces a CSV with object IDs present in the top-K NF anomalies for every embedding key. The optional `--intersect-with-isf` argument further restricts the list to objects also flagged by Isolation Forest. Example visualisation:
+
+```
+python -m scratch.display_outlier_images_spectrum \
+  --csv scratch/outputs/outlier_NFS_intersection.csv \
+  --split all --max 12 --cols 4 \
+  --save scratch/outputs/outliers_NFS_grid_intersection.png --index euclid_index.csv
+```
+
+# Highlight Dual AGN on UMAP
+
+```
+python -m scratch.highlight_dual_agn_umap \
+    --embeddings /pbs/throng/training/astroinfo2025/work/maxime/data_all_tokens_spectrums.pt \
+    --dual-csv Dual_agn.csv \
+    --output scratch/outputs/dual_agn_umap.png \
+    --n-neighbors 30 --min-dist 0.05
+```
+
+Creates a three-panel UMAP projection (HSC+DESI, spectrum, HSC) with Dual AGN candidates highlighted in red.
+
+# Train Dual AGN regressor
+
+```
+python -m scratch.train_dual_agn_regressor \
+    --embeddings /pbs/throng/training/astroinfo2025/work/maxime/data_all_tokens_spectrums.pt \
+    --dual-csv Dual_agn.csv \
+    --embedding-key embedding_hsc_desi \
+    --output scratch/outputs/dual_agn_scores.csv \
+    --epochs 40 --hidden-dim 512 --dropout 0.2
+```
+
+Fits a small neural regressor on the chosen embedding space and writes a ranked CSV of predicted Dual AGN scores for every object in the embeddings file.
+
+# Dual AGN score UMAP
+
+```
+python -m scratch.plot_dual_agn_scores_umap \
+    --embeddings /pbs/throng/training/astroinfo2025/work/maxime/data_all_tokens_spectrums.pt \
+    --scores-csv scratch/outputs/dual_agn_scores.csv \
+    --output scratch/outputs/dual_agn_scores_umap.png \
+    --n-neighbors 30 --min-dist 0.05 --standardize
+```
+
+Colours each embedding UMAP by the regressor score to highlight likely Dual AGN candidates across modalities.
+
+# Flow anomaly grid generation
+
+```
+python -m scratch.display_outlierNFs_images_spectrum \
+  --scores-csv scratch/outputs/anomaly_scores.csv \
+  --split all \
+  --cache-dir /pbs/throng/training/astroinfo2025/model/euclid_desi/hf_home/datasets \
+  --max 12 \
+  --cols 4 \
+  --output-dir scratch/outputs/nf_anomaly_grids \
+  --index euclid_index.csv
+```
+
+Creates three grids (one per embedding key) of RGB cutouts paired with their DESI spectra for the top NF anomalies.
+
 # Display outliers
 
 ```
