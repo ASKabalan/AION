@@ -47,6 +47,7 @@ def generate_embeddings(
 
     batch_tokens_spec_image: list[dict[str, torch.Tensor]] = []
     batch_tokens_image: list[dict[str, torch.Tensor]] = []
+    batch_tokens_spec_only: list[dict[str, torch.Tensor]] = []
     batch_metadata: list[tuple[str, float]] = []
 
     def _concat_token_dicts(token_dicts: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
@@ -54,18 +55,20 @@ def generate_embeddings(
         return {k: torch.cat([d[k] for d in token_dicts], dim=0) for k in keys}
 
     def _flush_batches() -> None:
-        nonlocal batch_tokens_spec_image, batch_tokens_image, batch_metadata
+        nonlocal batch_tokens_spec_image, batch_tokens_image, batch_tokens_spec_only, batch_metadata
         if not batch_metadata:
             return
 
         tokens_spec = _concat_token_dicts(batch_tokens_spec_image)
         tokens_img = _concat_token_dicts(batch_tokens_image)
+        tokens_spec_only = _concat_token_dicts(batch_tokens_spec_only)
 
         embedded_spec = model.encode(tokens_spec).mean(dim=1).cpu()
         embedded_img = model.encode(tokens_img).mean(dim=1).cpu()
+        embedded_spec_only = model.encode(tokens_spec_only).mean(dim=1).cpu()
 
-        for idx_entry, ((object_id, redshift), emb_spec, emb_img) in enumerate(
-            zip(batch_metadata, embedded_spec, embedded_img)
+        for idx_entry, ((object_id, redshift), emb_spec, emb_img, emb_spec_only) in enumerate(
+            zip(batch_metadata, embedded_spec, embedded_img, embedded_spec_only)
         ):
             results.append(
                 {
@@ -73,6 +76,7 @@ def generate_embeddings(
                     "redshift": redshift,
                     "embedding_hsc_desi": emb_spec,
                     "embedding_hsc": emb_img,
+                    "embedding_spectrum": emb_spec_only,
                 }
             )
 
@@ -86,9 +90,14 @@ def generate_embeddings(
                     key: batch_tokens_image[idx_entry][key].squeeze(0).detach().cpu()
                     for key in batch_tokens_image[idx_entry]
                 }
+                record["tokens_spectrum"] = {
+                    key: batch_tokens_spec_only[idx_entry][key].squeeze(0).detach().cpu()
+                    for key in batch_tokens_spec_only[idx_entry]
+                }
 
         batch_tokens_spec_image.clear()
         batch_tokens_image.clear()
+        batch_tokens_spec_only.clear()
         batch_metadata.clear()
 
     progress = tqdm(indices, total=limit, desc="Encoding", unit="obj", leave=False)
@@ -123,9 +132,11 @@ def generate_embeddings(
 
         tokens_spec_image = codec_manager.encode(hsc_img, desi_spec)
         tokens_image = codec_manager.encode(hsc_img)
+        tokens_spec_only = codec_manager.encode(desi_spec)
 
         batch_tokens_spec_image.append(tokens_spec_image)
         batch_tokens_image.append(tokens_image)
+        batch_tokens_spec_only.append(tokens_spec_only)
 
         batch_metadata.append((object_id, redshift))
 
