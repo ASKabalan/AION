@@ -3,11 +3,50 @@ import itertools
 from abc import ABC, abstractmethod
 from typing import Optional, Iterator, Union, Tuple
 import torch
+import torch.nn.functional as F
 import numpy as np
 from datasets import load_dataset, Dataset, load_from_disk
 from tqdm import tqdm
 
-from aion.modalities import HSCImage, DESISpectrum, EuclidImage
+from aion.modalities import HSCImage, DESISpectrum, EuclidImage , Z
+
+
+def collate_modalities(batch):
+    if len(batch) == 0:
+        return batch
+
+    first = batch[0]
+
+    if isinstance(first, tuple):
+        return tuple(collate_modalities([item[i] for item in batch]) for i in range(len(first)))
+
+    if isinstance(first, torch.Tensor):
+        return torch.stack(batch)
+
+    if isinstance(first, HSCImage) or isinstance(first, EuclidImage):
+        flux_list = [item.flux for item in batch]
+        flux = torch.stack(flux_list)
+        return type(first)(flux=flux, bands=first.bands)
+
+    if isinstance(first, DESISpectrum):
+        flux_list = [item.flux for item in batch]
+        ivar_list = [item.ivar for item in batch]
+        wavelength_list = [item.wavelength for item in batch]
+        mask_list = [item.mask for item in batch]
+
+        flux = torch.stack(flux_list)
+        ivar = torch.stack(ivar_list)
+        wavelength = torch.stack(wavelength_list)
+        mask = torch.stack(mask_list)
+
+        return DESISpectrum(flux=flux, ivar=ivar, wavelength=wavelength, mask=mask)
+
+    if isinstance(first, Z):
+        value_list = [item.value for item in batch]
+        value = torch.stack(value_list)
+        return Z(value=value)
+
+    return batch
 
 
 HSC_G_TO_EUCLID_VIS = (0.1312 , 0.01147)
@@ -19,16 +58,19 @@ class AIONDataset(ABC):
     def __init__(
         self,
         cache_dir: str,
-        batch_size: int = 32,
-        batch_count: Optional[int] = None,
+        max_entries: Optional[int] = None,
         device: str = "cpu",
         split: str = "train",
+        mode: str = "streaming",
     ):
         self.cache_dir = cache_dir
-        self.batch_size = batch_size
-        self.batch_count = batch_count
+        self.max_entries = max_entries
         self.device = device
         self.split = split
+        self.mode = mode
+
+        if mode not in ["streaming", "local"]:
+            raise ValueError(f"mode must be 'streaming' or 'local', got '{mode}'")
 
         self.slice_dir = os.path.join(cache_dir, f"{self._dataset_name()}_slice")
         self.samples = None
@@ -49,13 +91,20 @@ class AIONDataset(ABC):
     def _get_split(self) -> str:
         return self.split
 
-    def _num_samples_needed(self) -> Optional[int]:
-        if self.batch_count is None:
-            return None
-        return self.batch_size * self.batch_count
-
     def _ensure_samples(self):
-        num_needed = self._num_samples_needed()
+        if self.mode == "local":
+            if not os.path.isdir(self.slice_dir):
+                raise FileNotFoundError(
+                    f"Local mode requires existing cache at {self.slice_dir}. "
+                    f"Use mode='streaming' first to download the dataset."
+                )
+            try:
+                ds = load_from_disk(self.slice_dir)
+                self.samples = [ds[i] for i in range(len(ds))]
+                print(f"Loaded {len(self.samples)} samples from local cache: {self.slice_dir}")
+            except Exception as e:
+                raise RuntimeError(f"Failed to load local cache from {self.slice_dir}: {e}")
+            return
 
         if os.path.isdir(self.slice_dir):
             try:
@@ -68,14 +117,14 @@ class AIONDataset(ABC):
                 return
             existing_count = len(ds)
 
-            if num_needed is None or existing_count >= num_needed:
-                self.samples = [ds[i] for i in range(existing_count if num_needed is None else num_needed)]
+            if self.max_entries is None or existing_count >= self.max_entries:
+                self.samples = [ds[i] for i in range(existing_count if self.max_entries is None else self.max_entries)]
                 print(f"Loaded {len(self.samples)} samples from disk: {self.slice_dir}")
                 return
 
-            print(f"Found {existing_count} cached samples, need {num_needed}. Streaming additional samples...")
+            print(f"Found {existing_count} cached samples, need {self.max_entries}. Streaming additional samples...")
             existing_samples = [ds[i] for i in range(existing_count)]
-            additional_needed = num_needed - existing_count
+            additional_needed = self.max_entries - existing_count
 
             ds_stream = load_dataset(
                 self._repo_id(),
@@ -102,12 +151,12 @@ class AIONDataset(ABC):
                 streaming=True,
             )
 
-            if num_needed is None:
+            if self.max_entries is None:
                 samples = list(tqdm(ds_stream, desc="Streaming all samples"))
             else:
                 samples = list(itertools.islice(
-                    tqdm(ds_stream, total=num_needed, desc="Streaming samples"),
-                    num_needed
+                    tqdm(ds_stream, total=self.max_entries, desc="Streaming samples"),
+                    self.max_entries
                 ))
 
             Dataset.from_list(samples).save_to_disk(self.slice_dir)
@@ -118,57 +167,13 @@ class AIONDataset(ABC):
         return len(self.samples)
 
     def __getitem__(self, idx: int):
-        if idx < 0 or idx >= (len(self.samples) + self.batch_size - 1) // self.batch_size:
-            raise IndexError(f"Batch index {idx} out of range")
-        start_idx = idx * self.batch_size
-        end_idx = min(start_idx + self.batch_size, len(self.samples))
-        batch_samples = self.samples[start_idx:end_idx]
-        return self._convert_batch(batch_samples)
+        if idx < 0 or idx >= len(self.samples):
+            raise IndexError(f"Sample index {idx} out of range")
+        return self._convert_sample(self.samples[idx])
 
     def __iter__(self) -> Iterator:
-        for i in range(0, len(self.samples), self.batch_size):
-            batch_samples = self.samples[i:i + self.batch_size]
-            yield self._convert_batch(batch_samples)
-
-    def _convert_batch(self, batch_samples):
-        converted = [self._convert_sample(sample) for sample in batch_samples]
-
-        if isinstance(converted[0], tuple):
-            return tuple(self._stack_modalities([c[i] for c in converted]) for i in range(len(converted[0])))
-        else:
-            return self._stack_modalities(converted)
-
-    def _stack_modalities(self, modalities):
-        if len(modalities) == 0:
-            return None
-
-        first = modalities[0]
-
-        if isinstance(first, HSCImage) or isinstance(first, EuclidImage):
-            flux_list = [m.flux for m in modalities]
-            flux = torch.stack(flux_list).to(self.device)
-            return type(first)(flux=flux, bands=first.bands)
-
-        elif isinstance(first, DESISpectrum):
-            flux_list = [m.flux for m in modalities]
-            ivar_list = [m.ivar for m in modalities]
-            wavelength_list = [m.wavelength for m in modalities]
-            mask_list = [m.mask for m in modalities]
-
-            flux = torch.stack(flux_list).to(self.device)
-            ivar = torch.stack(ivar_list).to(self.device)
-            wavelength = torch.stack(wavelength_list).to(self.device)
-            mask = torch.stack(mask_list).to(self.device)
-
-            return DESISpectrum(
-                flux=flux,
-                ivar=ivar,
-                wavelength=wavelength,
-                mask=mask,
-            )
-
-        else:
-            raise ValueError(f"Unknown modality type: {type(first)}")
+        for sample in self.samples:
+            yield self._convert_sample(sample)
 
 
 class HSCDataset(AIONDataset):
@@ -212,7 +217,7 @@ class EuclidDataset(AIONDataset):
         return "euclid"
 
     def _repo_id(self) -> str:
-        return "msiudek/astroPT_euclid_dataset"
+        return "msiudek/astroPT_euclid_training_dataset"
 
     def _convert_sample(self, sample: dict) -> EuclidImage:
         vis_image = np.array(sample['VIS_image'])
@@ -225,6 +230,13 @@ class EuclidDataset(AIONDataset):
             dtype=torch.float32
         )
 
+        flux = F.interpolate(
+            flux.unsqueeze(0),
+            size=(160, 160),
+            mode='bilinear',
+            align_corners=False
+        ).squeeze(0)
+
         bands = ['EUCLID-VIS', 'EUCLID-Y', 'EUCLID-J', 'EUCLID-H']
 
         return EuclidImage(flux=flux, bands=bands)
@@ -235,27 +247,38 @@ class EuclidDESIDataset(AIONDataset):
         return "euclid_desi"
 
     def _repo_id(self) -> str:
-        return "msiudek/astroPT_euclid_desi_dataset"
+        return "msiudek/astroPT_euclid_Q1_desi_dr1_dataset"
 
     def _get_split(self) -> str:
-        return "train_batch_1"
+        return "train"
 
-    def _convert_sample(self, sample: dict) -> Tuple[HSCImage, DESISpectrum]:
+    def _convert_sample(self, sample: dict) -> Tuple[torch.Tensor, EuclidImage, DESISpectrum, Z]:
         vis_image = np.array(sample['VIS_image']) * HSC_G_TO_EUCLID_VIS[0] + HSC_G_TO_EUCLID_VIS[1]
         nisp_y_image = np.array(sample['NISP_Y_image']) * HSC_R_TO_EUCLID_Y[0] + HSC_R_TO_EUCLID_Y[1]
         nisp_j_image = np.array(sample['NISP_J_image']) * HSC_Y_TO_EUCLID_J[0] + HSC_Y_TO_EUCLID_J[1]
         nisp_h_image = np.array(sample['NISP_H_image']) * HSC_2_TO_EUCLID_H[0] + HSC_2_TO_EUCLID_H[1]
+        redshift = sample['redshift']
 
         euclid_flux = torch.tensor(
             np.stack([vis_image, nisp_y_image, nisp_j_image, nisp_h_image], axis=0),
             dtype=torch.float32
         )
 
-        euclid_as_hsc = HSCImage(
+        euclid_flux = F.interpolate(
+            euclid_flux.unsqueeze(0),
+            size=(160, 160),
+            mode='bilinear',
+            align_corners=False
+        ).squeeze(0)
+
+        euclid_image = EuclidImage(
             flux=euclid_flux,
             bands=['EUCLID-VIS', 'EUCLID-Y', 'EUCLID-J', 'EUCLID-H']
-            #bands=['HSC-VIS', 'HSC-Y', 'HSC-J', 'HSC-H']
         )
+
+        rgb_image = torch.tensor(np.array(sample['RGB_image']), dtype=torch.uint8)
+        #if rgb_image.ndim == 3:
+        #    rgb_image = rgb_image.permute(2, 0, 1)
 
         spectrum = sample['spectrum']
         flux = np.array(spectrum['flux'])
@@ -263,7 +286,7 @@ class EuclidDESIDataset(AIONDataset):
         wavelength = np.array(spectrum['wavelength'])
 
         ivar = np.where(error > 0, 1.0 / (error ** 2), 0.0)
-        mask = error > 0
+        mask = torch.zeros_like(torch.tensor(flux, dtype=torch.float32), dtype=torch.bool)
 
         desi_spectrum = DESISpectrum(
             flux=torch.tensor(flux, dtype=torch.float32),
@@ -272,4 +295,6 @@ class EuclidDESIDataset(AIONDataset):
             mask=torch.tensor(mask, dtype=torch.bool),
         )
 
-        return euclid_as_hsc, desi_spectrum
+        redshift_modality = Z(value=torch.tensor([redshift], dtype=torch.float32))
+
+        return rgb_image, euclid_image, desi_spectrum, redshift_modality
