@@ -16,9 +16,9 @@ from scratch.encode_one_object import project_euclid_to_hsc
 
 @torch.inference_mode()
 def generate_embeddings(
-    split: str = "train_batch_1",
-    cache_dir: str = "/pbs/throng/training/astroinfo2025/model/euclid_desi/hf_home/datasets",
-    model_dir: Path = Path("/pbs/throng/training/astroinfo2025/model"),
+    split: str = "train",
+    cache_dir: str = "/n03data/ronceray/datasets",
+    model_dir: Path = Path("/n03data/ronceray/huggingface/aion"),
     device: str | torch.device | None = None,
     max_samples: int | None = None,
     output_path: str | Path | None = None,
@@ -166,16 +166,16 @@ def main(argv=None):
     parser.add_argument(
         "--split",
         type=str,
-        default="train_batch_1",
+        default="train",
         help="Dataset split (comma-separated list or 'all' for every available split)",
     )
     parser.add_argument(
         "--cache-dir",
         type=str,
-        default="/pbs/throng/training/astroinfo2025/model/euclid_desi/hf_home/datasets",
+        default="/n03data/ronceray/datasets",
         help="Dataset cache directory",
     )
-    parser.add_argument("--model-dir", type=str, default="/pbs/throng/training/astroinfo2025/model")
+    parser.add_argument("--model-dir", type=str, default="/n03data/ronceray/huggingface/aion")
     parser.add_argument("--device", type=str, default=None, help="'cuda' or 'cpu'")
     parser.add_argument("--max-samples", type=int, default=None, help="Limit number of samples")
     parser.add_argument("--output", type=str, required=True, help="Path to save embeddings (.pt)")

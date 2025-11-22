@@ -167,8 +167,8 @@ def find_mask(tokens: dict, candidates: list[str]) -> torch.Tensor | None:
 def encode_one_object(
     index: int = 0,
     split: str = "train_batch_1",
-    cache_dir: str = "/pbs/throng/training/astroinfo2025/model/euclid_desi/hf_home/datasets",
-    model_dir: Path = Path("/pbs/throng/training/astroinfo2025/model"),
+    cache_dir: str = "/n03data/ronceray/datasets",
+    model_dir: Path = Path("/n03data/ronceray/huggingface/aion"),
     device: str | torch.device = None,
     save_path: str | None = None,
     see_image: str | None = None,
@@ -294,8 +294,8 @@ def main(argv=None):
         default="train_batch_1",
         help="Dataset split (comma-separated list or 'all' for every available split)",
     )
-    parser.add_argument("--cache-dir", type=str, default="/pbs/throng/training/astroinfo2025/model/euclid_desi/hf_home/datasets")
-    parser.add_argument("--model-dir", type=str, default="/pbs/throng/training/astroinfo2025/model")
+    parser.add_argument("--cache-dir", type=str, default="/n03data/ronceray/datasets")
+    parser.add_argument("--model-dir", type=str, default="/n03data/ronceray/huggingface/aion")
     parser.add_argument("--device", type=str, default=None, help="'cuda' or 'cpu'")
     parser.add_argument("--save", type=str, default=None, help="Optional path to save embeddings (.pt)")
     parser.add_argument(

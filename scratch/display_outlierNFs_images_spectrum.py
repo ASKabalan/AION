@@ -68,7 +68,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument(
         "--cache-dir",
         type=str,
-        default="/pbs/throng/training/astroinfo2025/model/euclid_desi/hf_home/datasets",
+        default="/n03data/ronceray/datasets",
     )
     parser.add_argument("--max", type=int, default=12, help="Max number of anomalies per embedding key")
     parser.add_argument("--cols", type=int, default=4, help="Number of columns in each grid")

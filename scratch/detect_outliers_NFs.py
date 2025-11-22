@@ -113,17 +113,18 @@ def train_flow(
     for epoch in range(1, epochs + 1):
         total_loss = 0.0
         total_items = 0
+        skipped_batches = 0
         for (batch,) in loader:
             batch = batch.to(device)
             log_prob = flow.log_prob(batch)
             if not torch.isfinite(log_prob).all():
-                print("[warn] encountered non-finite log_prob values; skipping batch")
                 optimizer.zero_grad(set_to_none=True)
+                skipped_batches += 1
                 continue
             loss = -log_prob.mean()
             if not torch.isfinite(loss):
-                print(f"[warn] encountered non-finite loss ({loss.item()}); skipping batch")
                 optimizer.zero_grad(set_to_none=True)
+                skipped_batches += 1
                 continue
             optimizer.zero_grad(set_to_none=True)
             loss.backward()
@@ -133,6 +134,17 @@ def train_flow(
             total_loss += loss.item() * batch.size(0)
             total_items += batch.size(0)
         avg_loss = total_loss / max(total_items, 1)
+        if skipped_batches:
+            print(
+                f"[warn] epoch {epoch:03d}: skipped {skipped_batches}/{len(loader)} batches "
+                "due to non-finite log_prob or loss",
+            )
+            if skipped_batches == len(loader):
+                print(
+                    "[error] all batches failed in this epoch; stopping early. "
+                    "Try lowering --lr or decreasing --clip-sigma for stronger clipping.",
+                )
+                break
         if epoch == 1 or epoch == epochs or (log_every > 0 and epoch % log_every == 0):
             print(f"[{flow.__class__.__name__}] epoch {epoch:03d}/{epochs:03d} | loss={avg_loss:.4f}")
     flow.eval()
@@ -149,6 +161,36 @@ def compute_sigma(values: np.ndarray) -> np.ndarray:
     if std < 1e-8:
         return np.zeros_like(values)
     return (values - mean) / std
+
+
+def filter_nonfinite_rows(
+    tensor: torch.Tensor,
+    object_ids: Sequence[str],
+) -> tuple[torch.Tensor, list[str]]:
+    mask = torch.isfinite(tensor).all(dim=1)
+    if mask.all():
+        return tensor, list(object_ids)
+    filtered_tensor = tensor[mask]
+    filtered_ids = [obj for obj, keep in zip(object_ids, mask.tolist()) if keep]
+    dropped = len(object_ids) - len(filtered_ids)
+    print(f"[warn] dropped {dropped} rows containing NaN/inf values before training")
+    if len(filtered_tensor) == 0:
+        raise SystemExit("All rows were removed due to non-finite values; cannot train flow.")
+    return filtered_tensor, filtered_ids
+
+
+def clip_embeddings_by_sigma(tensor: torch.Tensor, sigma: float) -> torch.Tensor:
+    if sigma is None or sigma <= 0:
+        return tensor
+    mean = tensor.mean(dim=0, keepdim=True)
+    std = tensor.std(dim=0, keepdim=True).clamp_min(1e-6)
+    lower = mean - sigma * std
+    upper = mean + sigma * std
+    clipped = torch.clamp(tensor, min=lower, max=upper)
+    num_rows_clipped = int((clipped != tensor).any(dim=1).sum().item())
+    if num_rows_clipped > 0:
+        print(f"[info] clipped {num_rows_clipped} rows outside ±{sigma:.1f}σ to stabilize flow training")
+    return clipped
 
 
 def collate_rows(
@@ -235,6 +277,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Disable per-feature standardization before training the flow.",
     )
+    parser.add_argument(
+        "--clip-sigma",
+        type=float,
+        default=8.0,
+        help="Clip embeddings to mean ± sigma·std to avoid NF instabilities. Set <=0 to disable.",
+    )
     return parser.parse_args(argv)
 
 
@@ -255,6 +303,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             continue
         available_keys.append(key)
         embeddings_tensor = torch.from_numpy(embeddings_array).float()
+        embeddings_tensor, object_ids = filter_nonfinite_rows(embeddings_tensor, object_ids)
         if embeddings_tensor.ndim != 2:
             raise SystemExit(f"Expected embeddings for '{key}' to have shape (N, D), got {embeddings_tensor.shape}")
         if len(embeddings_tensor) < 2:
@@ -264,6 +313,10 @@ def main(argv: Sequence[str] | None = None) -> None:
             print(
                 f"[{key}] standardized embeddings (feature mean≈{mean.mean():.4f}, feature std≈{std.mean():.4f})",
             )
+        embeddings_tensor = clip_embeddings_by_sigma(embeddings_tensor, args.clip_sigma)
+        embeddings_tensor, object_ids = filter_nonfinite_rows(embeddings_tensor, object_ids)
+        if len(embeddings_tensor) < 2:
+            raise SystemExit(f"Need at least 2 samples for '{key}' after cleaning; got {len(embeddings_tensor)}")
         flow = build_flow(
             dim=embeddings_tensor.shape[1],
             hidden_features=args.hidden_features,

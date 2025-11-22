@@ -74,10 +74,11 @@ python -m scratch.detect_outliers_NFs \
     --input /pbs/throng/training/astroinfo2025/work/maxime/data_all_tokens_spectrums.pt \
     --output-csv scratch/outputs/anomaly_scores.csv \
     --epochs 250 --num-transforms 8 --hidden-features 256 \
-    --lr 1e-4 --grad-clip 5 --weight-decay 1e-5
+    --lr 1e-4 --grad-clip 5 --weight-decay 1e-5 --clip-sigma 8
 ```
 
 Produces a per-embedding table of log-likelihoods, negative log-likelihoods, and `anomaly_sigma` scores (z-scores over the negative log-likelihood) for every object in the embedding file. Requires the `normflows` package (`pip install normflows`).
+If you see warnings about non-finite `log_prob`, try lowering `--lr` and/or reducing `--clip-sigma` to enforce stronger per-feature clipping before training.
 
 # Visualise flow anomaly scores
 

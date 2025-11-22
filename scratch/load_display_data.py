@@ -30,7 +30,7 @@ except Exception:
     Image = None
 
 try:
-    from datasets import load_dataset, concatenate_datasets
+    from datasets import load_dataset, concatenate_datasets, load_from_disk
 except ImportError as e:
     raise SystemExit(
         "Le paquet 'datasets' est requis. Installe-le avec: pip install datasets"
@@ -38,14 +38,20 @@ except ImportError as e:
 
 from torch.utils.data import DataLoader
 
+HF_DATASET_ID = "msiudek/astroPT_euclid_Q1_desi_dr1_dataset"
+LOCAL_SPLITS = {
+    "train": "msiudek__astroPT_euclid_Q1_desi_dr1_dataset__train",
+    "test": "msiudek__astroPT_euclid_Q1_desi_dr1_dataset__test",
+}
+
 
 class EuclidDESIDataset(torch.utils.data.Dataset):
     """PyTorch Dataset wrapper for the Euclid+DESI HuggingFace dataset."""
     def __init__(
         self,
-        split="train_batch_1",
+        split="train",
         transform=None,
-        cache_dir="/pbs/throng/training/astroinfo2025/model/euclid_desi/hf_home/datasets",
+        cache_dir="/n03data/ronceray/datasets",
         verbose: bool = False,
     ):
         import os
@@ -56,37 +62,50 @@ class EuclidDESIDataset(torch.utils.data.Dataset):
         requested_splits: list[str]
         datasets_to_concat: list = []
 
+        local_split_paths = {
+            name: os.path.join(cache_dir, path)
+            for name, path in LOCAL_SPLITS.items()
+            if os.path.isdir(os.path.join(cache_dir, path))
+        }
+
+        def _load_split(split_name: str):
+            """Charge un split depuis le disque local si disponible, sinon depuis HF."""
+            if split_name in local_split_paths:
+                if self.verbose:
+                    print(f"Loading split '{split_name}' from {local_split_paths[split_name]}")
+                return load_from_disk(local_split_paths[split_name])
+            if self.verbose:
+                print(f"Loading split '{split_name}' from HF dataset {HF_DATASET_ID}")
+            return load_dataset(
+                HF_DATASET_ID,
+                split=split_name,
+                cache_dir=cache_dir,
+            )
+
         if isinstance(split, str):
             normalized = split.strip()
             if normalized.lower() in {"all", "*"}:
-                dataset_dict = load_dataset(
-                    "msiudek/astroPT_euclid_desi_dataset",
-                    cache_dir=cache_dir,
-                )
-                requested_splits = list(dataset_dict.keys())
-                datasets_to_concat = [dataset_dict[name] for name in requested_splits]
+                requested_splits = list(local_split_paths) or ["train", "test"]
             else:
                 requested_splits = [part.strip() for part in normalized.split(",") if part.strip()]
                 if not requested_splits:
                     raise ValueError("No valid split names provided")
-                for split_name in requested_splits:
-                    datasets_to_concat.append(
-                        load_dataset(
-                            "msiudek/astroPT_euclid_desi_dataset",
-                            split=split_name,
-                            cache_dir=cache_dir,
-                        )
-                    )
+            for split_name in requested_splits:
+                try:
+                    datasets_to_concat.append(_load_split(split_name))
+                except Exception as e:
+                    raise RuntimeError(
+                        f"Impossible de charger le split '{split_name}' (local ou Hub): {e}"
+                    ) from e
         elif isinstance(split, Sequence):
             requested_splits = [str(part) for part in split]
             for split_name in requested_splits:
-                datasets_to_concat.append(
-                    load_dataset(
-                        "msiudek/astroPT_euclid_desi_dataset",
-                        split=split_name,
-                        cache_dir=cache_dir,
-                    )
-                )
+                try:
+                    datasets_to_concat.append(_load_split(split_name))
+                except Exception as e:
+                    raise RuntimeError(
+                        f"Impossible de charger le split '{split_name}' (local ou Hub): {e}"
+                    ) from e
         else:
             raise TypeError("split must be a string, list or tuple of split names")
 
@@ -179,7 +198,7 @@ class EuclidDESIDataset(torch.utils.data.Dataset):
         nisp_h_image = _to_tensor_img(sample.get('NISP_H_image'))
 
         return {
-            'object_id': sample.get('object_id'),
+            'object_id': sample.get('object_id') or sample.get('targetid'),
             'targetid': sample.get('targetid'),
             'redshift': sample.get('redshift'),
             'rgb_image': rgb_image_t,
@@ -193,9 +212,9 @@ class EuclidDESIDataset(torch.utils.data.Dataset):
 
 
 def display_one_sample(
-    split: str = "train_batch_1",
+    split: str = "train",
     index: int = 0,
-    cache_dir: str = "/pbs/throng/training/astroinfo2025/model/euclid_desi/hf_home/datasets",
+    cache_dir: str = "/n03data/ronceray/datasets",
     save_path: Optional[str] = None,
     show_bands: bool = False,
 ):
@@ -292,9 +311,9 @@ def parse_args(argv=None):
         description="Charge et affiche une image du dataset Euclid+DESI."
     )
     p.add_argument("--index", type=int, default=0, help="Index de l'échantillon à afficher (défaut: 0)")
-    p.add_argument("--split", type=str, default="train_batch_1", help="Split HF à utiliser")
+    p.add_argument("--split", type=str, default="train", help="Split HF à utiliser")
     p.add_argument("--cache-dir", type=str,
-                   default="/pbs/throng/training/astroinfo2025/model/euclid_desi/hf_home/datasets",
+                   default="/n03data/ronceray/datasets",
                    help="Répertoire de cache HuggingFace")
     p.add_argument("--save", type=str, default=None, help="Chemin de sauvegarde de la figure (png/jpg, optionnel)")
     p.add_argument("--no-gui", action="store_true", help="N'ouvre pas de fenêtre (sauvegarde seulement si --save)")
