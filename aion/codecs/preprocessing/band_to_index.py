@@ -9,6 +9,10 @@ BAND_TO_INDEX = {
     "DES-R": 6,
     "DES-I": 7,
     "DES-Z": 8,
+    "EUCLID-VIS": 9,
+    "EUCLID-Y": 10,
+    "EUCLID-J": 11,
+    "EUCLID-H": 12,
 }
 
 # Maximum band center values for HSC and DES bands
@@ -22,4 +26,8 @@ BAND_CENTER_MAX = {
     "DES-R": 15,
     "DES-I": 20,
     "DES-Z": 25,
+    "EUCLID-VIS": 4.5,
+    "EUCLID-Y": 10.2,
+    "EUCLID-J": 10.6,
+    "EUCLID-H": 10.7,
 }
