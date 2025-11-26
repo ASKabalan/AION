@@ -1,3 +1,12 @@
+"""
+Script to display a grid of Euclid RGB images for a list of object IDs.
+Useful for visual inspection of outliers or specific samples.
+
+Usage:
+    python -m scratch.display_outlier_images \
+        --csv outliers.csv \
+        --save outliers_grid.png
+"""
 import argparse
 import csv
 import math

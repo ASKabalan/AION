@@ -26,6 +26,7 @@ from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 import safetensors.torch as st
 from huggingface_hub import hf_hub_download
+from torch.optim.lr_scheduler import CosineAnnealingLR
 
 from scratch.load_display_data import EuclidDESIDataset
 from aion.codecs import ImageCodec
@@ -100,6 +101,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--resize", type=int, default=160, help="Resize Euclid bands to NxN before cropping.")
     parser.add_argument("--crop-size", type=int, default=96, help="Center-crop size for reconstruction loss.")
     parser.add_argument(
+        "--resume-from",
+        type=str,
+        default=None,
+        help="Path to a previously finetuned codec directory (containing a 'codecs/' subfolder) to resume from.",
+    )
+    parser.add_argument(
         "--num-workers",
         type=int,
         default=0,
@@ -110,6 +117,12 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=1.0,
         help="Max grad norm (<=0 disables clipping).",
+    )
+    parser.add_argument(
+        "--scheduler",
+        choices=["none", "cosine"],
+        default="none",
+        help="Optional LR scheduler; cosine anneals over total steps.",
     )
     parser.add_argument("--output", type=str, default="outputs/retrained_euclid_codec", help="Save directory.")
     parser.add_argument(
@@ -154,86 +167,112 @@ def main() -> None:
             loader = make_loader(0)
     print(f"Loaded {len(dataset)} samples; batches/epoch: {len(loader)} using num_workers={loader.num_workers}")
 
-    # Manually load codec weights and pad band-projection layers to include Euclid bands.
-    cfg_path = hf_hub_download(HF_REPO_ID, "codecs/image/config.json", local_files_only=True)
-    weights_path = hf_hub_download(HF_REPO_ID, "codecs/image/model.safetensors", local_files_only=True)
-    with open(cfg_path) as f:
-        codec_cfg = json.load(f)
-    codec = ImageCodec(
-        quantizer_levels=codec_cfg["quantizer_levels"],
-        hidden_dims=codec_cfg["hidden_dims"],
-        multisurvey_projection_dims=codec_cfg["multisurvey_projection_dims"],
-        n_compressions=codec_cfg["n_compressions"],
-        num_consecutive=codec_cfg["num_consecutive"],
-        embedding_dim=codec_cfg["embedding_dim"],
-        range_compression_factor=codec_cfg["range_compression_factor"],
-        mult_factor=codec_cfg["mult_factor"],
-    ).to(device)
-    state = st.load_file(weights_path, device="cpu")
-    print("quantizer_levels (from config):", codec_cfg["quantizer_levels"])
+    # Load codec: either resume from a previously finetuned checkpoint, or start from the base HF weights.
+    if args.resume_from:
+        print(f"[info] Resuming codec from {args.resume_from}")
+        resume_dir = Path(args.resume_from)
+        cfg_path = resume_dir / "codecs" / "image" / "config.json"
+        weights_path = resume_dir / "codecs" / "image" / "model.safetensors"
+        if not cfg_path.is_file() or not weights_path.is_file():
+            raise FileNotFoundError(
+                f"Expected config and weights under {resume_dir}/codecs/image/, "
+                f"but found cfg={cfg_path.is_file()} weights={weights_path.is_file()}",
+            )
+        with cfg_path.open() as f:
+            codec_cfg = json.load(f)
+        codec = ImageCodec(
+            quantizer_levels=codec_cfg["quantizer_levels"],
+            hidden_dims=codec_cfg["hidden_dims"],
+            multisurvey_projection_dims=codec_cfg["multisurvey_projection_dims"],
+            n_compressions=codec_cfg["n_compressions"],
+            num_consecutive=codec_cfg["num_consecutive"],
+            embedding_dim=codec_cfg["embedding_dim"],
+            range_compression_factor=codec_cfg["range_compression_factor"],
+            mult_factor=codec_cfg["mult_factor"],
+        ).to(device)
+        state = st.load_file(weights_path, device="cpu")
+        missing, unexpected = codec.load_state_dict(state, strict=False)
+        if missing or unexpected:
+            print(f"[info] resume state_dict load: missing={missing}, unexpected={unexpected}")
+    else:
+        # Manually load codec weights and pad band-projection layers to include Euclid bands.
+        cfg_path = hf_hub_download(HF_REPO_ID, "codecs/image/config.json", local_files_only=True)
+        weights_path = hf_hub_download(HF_REPO_ID, "codecs/image/model.safetensors", local_files_only=True)
+        with open(cfg_path) as f:
+            codec_cfg = json.load(f)
+        codec = ImageCodec(
+            quantizer_levels=codec_cfg["quantizer_levels"],
+            hidden_dims=codec_cfg["hidden_dims"],
+            multisurvey_projection_dims=codec_cfg["multisurvey_projection_dims"],
+            n_compressions=codec_cfg["n_compressions"],
+            num_consecutive=codec_cfg["num_consecutive"],
+            embedding_dim=codec_cfg["embedding_dim"],
+            range_compression_factor=codec_cfg["range_compression_factor"],
+            mult_factor=codec_cfg["mult_factor"],
+        ).to(device)
+        state = st.load_file(weights_path, device="cpu")
+        print("quantizer_levels (from config):", codec_cfg["quantizer_levels"])
 
-    # Pad subsample_in/out to accommodate extra Euclid channels (13 vs pretrained 9).
-    def _pad_param(name: str, target_shape):
-        tensor = state.get(name)
-        if tensor is None:
-            return
+        # Pad subsample_in/out to accommodate extra Euclid channels (13 vs pretrained 9).
+        def _pad_param(name: str, target_shape):
+            tensor = state.get(name)
+            if tensor is None:
+                return
 
-        old_shape = tensor.shape
-        if old_shape == target_shape:
-            return
+            old_shape = tensor.shape
+            if old_shape == target_shape:
+                return
 
-        new_tensor = torch.zeros(target_shape, dtype=tensor.dtype)
+            new_tensor = torch.zeros(target_shape, dtype=tensor.dtype)
 
-        # Copy overlapping region
-        common_slices_old = tuple(slice(0, min(o, n)) for o, n in zip(old_shape, target_shape))
-        common_slices_new = tuple(slice(0, min(o, n)) for o, n in zip(old_shape, target_shape))
-        new_tensor[common_slices_new] = tensor[common_slices_old]
+            # Copy overlapping region
+            common_slices_old = tuple(slice(0, min(o, n)) for o, n in zip(old_shape, target_shape))
+            common_slices_new = tuple(slice(0, min(o, n)) for o, n in zip(old_shape, target_shape))
+            new_tensor[common_slices_new] = tensor[common_slices_old]
 
-        # If this is one of the band-related params, and there is a 9 -> 13 change,
-        # then we want to COPY the last original band (index 8) into the new Euclid slots.
-        if name in ("subsample_in.weight", "subsample_out.weight", "subsample_out.bias"):
-            # Find axis where 9 -> 13 (old bands -> new bands)
-            band_axis = None
-            for i, (o, n) in enumerate(zip(old_shape, target_shape)):
-                if o == 9 and n == 13:
-                    band_axis = i
-                    break
+            # If this is one of the band-related params, and there is a 9 -> 13 change,
+            # then we want to COPY the last original band (index 8) into the new Euclid slots.
+            if name in ("subsample_in.weight", "subsample_out.weight", "subsample_out.bias"):
+                # Find axis where 9 -> 13 (old bands -> new bands)
+                band_axis = None
+                for i, (o, n) in enumerate(zip(old_shape, target_shape)):
+                    if o == 9 and n == 13:
+                        band_axis = i
+                        break
 
-            if band_axis is not None:
-                # number of extra bands (13 - 9 = 4 for your case)
-                num_extra = target_shape[band_axis] - old_shape[band_axis]
+                if band_axis is not None:
+                    # number of extra bands (13 - 9 = 4 for your case)
+                    num_extra = target_shape[band_axis] - old_shape[band_axis]
 
-                # slice for the source band: index 8 along band_axis
-                src_slice = [slice(None)] * len(target_shape)
-                src_slice[band_axis] = slice(8, 9)  # last original band
+                    # slice for the source band: index 8 along band_axis
+                    src_slice = [slice(None)] * len(target_shape)
+                    src_slice[band_axis] = slice(8, 9)  # last original band
 
-                # slice for the destination bands: indices [9:13] along band_axis
-                dst_slice = [slice(None)] * len(target_shape)
-                dst_slice[band_axis] = slice(old_shape[band_axis], target_shape[band_axis])
+                    # slice for the destination bands: indices [9:13] along band_axis
+                    dst_slice = [slice(None)] * len(target_shape)
+                    dst_slice[band_axis] = slice(old_shape[band_axis], target_shape[band_axis])
 
-                # Take the last band and repeat it num_extra times along band_axis
-                patch = new_tensor[tuple(src_slice)]  # shape with size 1 along band_axis
+                    # Take the last band and repeat it num_extra times along band_axis
+                    patch = new_tensor[tuple(src_slice)]  # shape with size 1 along band_axis
 
-                repeat_factors = []
-                for i in range(len(target_shape)):
-                    if i == band_axis:
-                        repeat_factors.append(num_extra)
-                    else:
-                        repeat_factors.append(1)
+                    repeat_factors = []
+                    for i in range(len(target_shape)):
+                        if i == band_axis:
+                            repeat_factors.append(num_extra)
+                        else:
+                            repeat_factors.append(1)
 
-                patch_expanded = patch.repeat(*repeat_factors)
-                new_tensor[tuple(dst_slice)] = patch_expanded
+                    patch_expanded = patch.repeat(*repeat_factors)
+                    new_tensor[tuple(dst_slice)] = patch_expanded
 
-        state[name] = new_tensor
+            state[name] = new_tensor
 
-
-
-    _pad_param("subsample_in.weight", codec.subsample_in.weight.shape)
-    _pad_param("subsample_out.weight", codec.subsample_out.weight.shape)
-    _pad_param("subsample_out.bias", codec.subsample_out.bias.shape)
-    missing, unexpected = codec.load_state_dict(state, strict=False)
-    if missing or unexpected:
-        print(f"[info] state_dict load: missing={missing}, unexpected={unexpected}")
+        _pad_param("subsample_in.weight", codec.subsample_in.weight.shape)
+        _pad_param("subsample_out.weight", codec.subsample_out.weight.shape)
+        _pad_param("subsample_out.bias", codec.subsample_out.bias.shape)
+        missing, unexpected = codec.load_state_dict(state, strict=False)
+        if missing or unexpected:
+            print(f"[info] state_dict load: missing={missing}, unexpected={unexpected}")
 
     # Freeze everything
     for name, p in codec.named_parameters():
@@ -247,6 +286,10 @@ def main() -> None:
     codec.train()
 
     optimizer = torch.optim.Adam(codec.parameters(), lr=args.lr)
+    scheduler = None
+    if args.scheduler == "cosine":
+        total_steps = max(len(dataset) // max(args.batch_size, 1), 1) * max(args.epochs, 1)
+        scheduler = CosineAnnealingLR(optimizer, T_max=total_steps)
     criterion = torch.nn.MSELoss()
     crop = CenterCrop(crop_size=args.crop_size)
 
@@ -303,6 +346,8 @@ def main() -> None:
             if args.grad_clip and args.grad_clip > 0:
                 torch.nn.utils.clip_grad_norm_(codec.parameters(), args.grad_clip)
             optimizer.step()
+            if scheduler is not None:
+                scheduler.step()
 
             epoch_losses.append(loss.item())
             progress.set_postfix(loss=f"{loss.item():.6f}")

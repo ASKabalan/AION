@@ -1,3 +1,11 @@
+"""
+Script to display detailed information for a specific object or list of objects.
+It shows the RGB image, NISP bands, composite cutouts, and spectrum.
+
+Usage:
+    python -m scratch.show_object_detail --object-id 12345
+    python -m scratch.show_object_detail --csv list_of_ids.csv --output-dir details/
+"""
 import argparse
 import csv
 from pathlib import Path

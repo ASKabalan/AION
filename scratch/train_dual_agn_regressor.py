@@ -1,3 +1,15 @@
+"""
+Script to train a classifier/regressor to identify Dual AGN candidates from embeddings.
+It uses a labeled set of Dual AGN objects to train a neural network on the embedding space.
+Produces a scored CSV of all objects in the embedding file.
+
+Usage:
+    python -m scratch.train_dual_agn_regressor \
+        --embeddings /path/to/embeddings.pt \
+        --dual-csv /path/to/dual_agn_catalog.csv \
+        --output scratch/outputs/dual_agn_scores.csv \
+        --epochs 50
+"""
 import argparse
 import csv
 import random

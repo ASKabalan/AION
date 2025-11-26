@@ -1,3 +1,13 @@
+"""
+Script to highlight known Dual AGN candidates on UMAP projections.
+It reads a list of Dual AGN object IDs and overlays them on the UMAP of embeddings.
+
+Usage:
+    python -m scratch.highlight_dual_agn_umap \
+        --embeddings /path/to/embeddings.pt \
+        --dual-csv /path/to/dual_agn_catalog.csv \
+        --output scratch/outputs/dual_agn_umap.png
+"""
 import argparse
 import csv
 from pathlib import Path

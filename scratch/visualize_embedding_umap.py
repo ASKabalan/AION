@@ -1,3 +1,15 @@
+"""
+Script to visualize embedding UMAPs with thumbnails.
+It creates a grid of images (and optionally spectra) corresponding to points in the UMAP space,
+allowing for visual inspection of the embedding structure.
+
+Usage:
+    python -m scratch.visualize_embedding_umap \
+        --input /path/to/embeddings.pt \
+        --embedding-key embedding_hsc_desi \
+        --figure embedding_umap_hsc_desi.png \
+        --index euclid_index.csv
+"""
 import argparse
 from pathlib import Path
 from typing import Sequence
@@ -195,7 +207,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument(
         "--cache-dir",
         type=str,
-        default="/pbs/throng/training/astroinfo2025/model/euclid_desi/hf_home/datasets",
+        default="/n03data/ronceray/datasets",
     )
     parser.add_argument("--index", type=str, default=None, help="Optional CSV mapping object_id -> split/index")
     parser.add_argument("--grid-rows", type=int, default=12, help="Number of rows in the thumbnail grid")

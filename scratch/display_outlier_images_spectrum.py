@@ -1,3 +1,12 @@
+"""
+Script to display a grid of Euclid RGB images AND DESI spectra for a list of object IDs.
+Similar to display_outlier_images.py but includes spectral data.
+
+Usage:
+    python -m scratch.display_outlier_images_spectrum \
+        --csv outliers.csv \
+        --save outliers_grid_with_spectra.png
+"""
 import argparse
 from pathlib import Path
 from typing import Sequence

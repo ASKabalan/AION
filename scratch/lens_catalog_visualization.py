@@ -1,3 +1,15 @@
+"""
+Script to visualize a lens catalog in the context of AION embeddings.
+It matches a lens catalog (with object_ids) to the embeddings, highlights them on a UMAP,
+and generates a grid of images/spectra for the matched lenses.
+
+Usage:
+    python -m scratch.lens_catalog_visualization \
+        --lens-csv /path/to/lenses.csv \
+        --embeddings /path/to/embeddings.pt \
+        --output-umap scratch/outputs/lens_umap.png \
+        --output-grid scratch/outputs/lens_grid.png
+"""
 import argparse
 from decimal import Decimal, InvalidOperation
 from pathlib import Path

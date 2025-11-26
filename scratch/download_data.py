@@ -10,6 +10,16 @@ import numpy as np
 from PIL import Image
 
 import os
+
+"""
+Script to download the Euclid+DESI dataset from Hugging Face.
+It sets up the environment variables for cache directories and defines a PyTorch Dataset wrapper
+to verify that the data can be loaded and processed correctly.
+
+Usage:
+    python -m scratch.download_data
+"""
+
 os.environ["HF_HOME"] = "/pbs/throng/training/astroinfo2025/model/euclid_desi/hf_home"
 os.environ["HF_HUB_CACHE"] = "/pbs/throng/training/astroinfo2025/model/euclid_desi/hf_home/hub"
 os.environ["HF_DATASETS_CACHE"] = "/pbs/throng/training/astroinfo2025/model/euclid_desi/hf_home/datasets"

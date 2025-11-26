@@ -1,3 +1,15 @@
+"""
+Script to detect outliers in the embedding space using Isolation Forest.
+It identifies anomalous objects based on their embeddings and visualizes them on UMAP plots.
+It also saves the list of outlier IDs for further analysis.
+
+Usage:
+    python -m scratch.detect_outliers \
+        --input /path/to/embeddings.pt \
+        --figure-hsc-desi umap_hsc_desi_outliers.png \
+        --outliers-hsc-desi outliers_hsc_desi.csv \
+        --contamination 0.02
+"""
 import argparse
 import csv
 from pathlib import Path

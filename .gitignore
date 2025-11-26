@@ -175,3 +175,14 @@ cython_debug/
 notebooks
 data
 old_impl
+
+
+# Images and slurm outputs
+
+*.png 
+*.csv
+*.out 
+
+/outputs/*
+/outputs
+/scratch/ronceray/

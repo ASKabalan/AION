@@ -1,3 +1,15 @@
+"""
+Script to detect outliers using Normalizing Flows (NFs).
+It trains a Normalizing Flow model on the embeddings to learn the density distribution.
+Objects with low log-likelihoods are considered anomalies.
+Produces a CSV with anomaly scores for each object.
+
+Usage:
+    python -m scratch.detect_outliers_NFs \
+        --input /path/to/embeddings.pt \
+        --output-csv scratch/outputs/anomaly_scores.csv \
+        --epochs 250
+"""
 import argparse
 import csv
 import random

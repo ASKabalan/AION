@@ -1,3 +1,13 @@
+"""
+Script to visualize Normalizing Flow anomaly scores on UMAP projections.
+It colors the UMAP points based on log-probability, anomaly sigma, or rank.
+
+Usage:
+    python -m scratch.plot_anomaly_scores \
+        --embeddings /path/to/embeddings.pt \
+        --scores-csv scratch/outputs/anomaly_scores.csv \
+        --output-dir scratch/outputs/anomaly_umaps
+"""
 import argparse
 import csv
 from pathlib import Path

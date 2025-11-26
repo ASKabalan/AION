@@ -1,3 +1,13 @@
+"""
+Script to display image grids with spectra for top-k Normalizing Flow anomalies.
+It loads the anomaly scores, selects the top anomalies, and generates a visualization
+showing the Euclid RGB image and DESI spectrum for each.
+
+Usage:
+    python -m scratch.display_outlierNFs_images_spectrum \
+        --scores-csv scratch/outputs/anomaly_scores.csv \
+        --output-dir scratch/outputs/nf_anomaly_grids
+"""
 import argparse
 import csv
 from pathlib import Path

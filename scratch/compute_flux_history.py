@@ -1,3 +1,13 @@
+"""
+Script to compute and compare flux distributions between HSC and Euclid datasets.
+It can also estimate affine rescaling parameters to match Euclid flux statistics to HSC.
+
+Usage:
+    python -m scratch.compute_flux_history --both --rescale --nsample 500 \
+        --hsc-cache-dir /path/to/hsc \
+        --euclid-cache-dir /path/to/euclid \
+        --save hsc_vs_euclid_flux_hist.png --no-gui
+"""
 import argparse
 import os
 import numpy as np

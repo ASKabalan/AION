@@ -1,4 +1,13 @@
 # load_display_data.py
+"""
+Utility script to load and display samples from the Euclid+DESI dataset.
+It provides a PyTorch Dataset class `EuclidDESIDataset` and a function `display_one_sample`
+to visualize images, spectra, and SEDs.
+
+Usage:
+    python -m scratch.load_display_data --index 5 --show-bands --save outputs/img_5.png
+"""
+
 import argparse
 import os
 from random import sample

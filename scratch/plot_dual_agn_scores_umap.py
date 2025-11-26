@@ -1,3 +1,13 @@
+"""
+Script to visualize Dual AGN classifier scores on UMAP projections.
+It colors the UMAP points based on the score assigned by the Dual AGN regressor.
+
+Usage:
+    python -m scratch.plot_dual_agn_scores_umap \
+        --embeddings /path/to/embeddings.pt \
+        --scores-csv scratch/outputs/dual_agn_scores.csv \
+        --output scratch/outputs/dual_agn_scores_umap.png
+"""
 import argparse
 import csv
 from pathlib import Path

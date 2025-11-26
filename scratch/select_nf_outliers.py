@@ -1,3 +1,14 @@
+"""
+Script to select top-k anomalies from Normalizing Flow scores.
+It can optionally intersect these anomalies with those found by Isolation Forest.
+Produces a CSV file containing the selected outlier IDs.
+
+Usage:
+    python -m scratch.select_nf_outliers \
+        --scores-csv scratch/outputs/anomaly_scores.csv \
+        --output scratch/outputs/outlier_NFS_intersection.csv \
+        --top-k 150
+"""
 import argparse
 import csv
 from pathlib import Path

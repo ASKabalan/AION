@@ -1,4 +1,13 @@
 # generate_embeddings.py
+"""
+Script to generate embeddings for the Euclid+DESI dataset using a pre-trained AION model.
+It processes the dataset, projects Euclid images to HSC-like images, and runs the model
+to produce embeddings for images, spectra, and both combined.
+
+Usage:
+    python -m scratch.generate_embeddings --output /path/to/embeddings.pt --batch-size 20 --split all --keep-tokens
+"""
+
 import argparse
 from pathlib import Path
 from typing import Iterable
@@ -19,6 +28,7 @@ def generate_embeddings(
     split: str = "train",
     cache_dir: str = "/n03data/ronceray/datasets",
     model_dir: Path = Path("/n03data/ronceray/huggingface/aion"),
+    codec_dir: Path | None = None,
     device: str | torch.device | None = None,
     max_samples: int | None = None,
     output_path: str | Path | None = None,
@@ -32,7 +42,7 @@ def generate_embeddings(
         raise ValueError("output_path must be provided to save embeddings.")
 
     work_device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
-    model, codec_manager = load_model_and_codec(model_dir=model_dir, device=work_device)
+    model, codec_manager = load_model_and_codec(model_dir=model_dir, device=work_device, codec_dir=codec_dir)
 
     dataset = EuclidDESIDataset(split=split, cache_dir=cache_dir, verbose=verbose)
     total_dataset = len(dataset)
@@ -176,6 +186,12 @@ def main(argv=None):
         help="Dataset cache directory",
     )
     parser.add_argument("--model-dir", type=str, default="/n03data/ronceray/huggingface/aion")
+    parser.add_argument(
+        "--codec-dir",
+        type=str,
+        default=None,
+        help="Optional directory containing codec weights (e.g., retrained image codec). Defaults to model-dir.",
+    )
     parser.add_argument("--device", type=str, default=None, help="'cuda' or 'cpu'")
     parser.add_argument("--max-samples", type=int, default=None, help="Limit number of samples")
     parser.add_argument("--output", type=str, required=True, help="Path to save embeddings (.pt)")
@@ -193,6 +209,7 @@ def main(argv=None):
         split=args.split,
         cache_dir=args.cache_dir,
         model_dir=Path(args.model_dir),
+        codec_dir=Path(args.codec_dir) if args.codec_dir else None,
         device=args.device,
         max_samples=args.max_samples,
         output_path=args.output,

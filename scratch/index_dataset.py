@@ -1,3 +1,11 @@
+"""
+Script to create a CSV index of the dataset.
+It maps object IDs to their split (train/test) and index within the dataset.
+This is useful for quick lookups and ensuring consistent ordering.
+
+Usage:
+    python -m scratch.index_dataset --output euclid_index.csv --splits all
+"""
 import argparse
 import csv
 from pathlib import Path
