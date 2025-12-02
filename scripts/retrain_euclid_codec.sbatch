@@ -3,12 +3,12 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --gres=gpu:1
-#SBATCH --time=30:00:00
+#SBATCH --time=40:00:00
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=32G
+#SBATCH --output=slurm_retrain_euclid_codec_%j.out
 #SBATCH --nodelist=n36
 #SBATCH --partition=pscompl
-#SBATCH --output=slurm_retrain_euclid_codec_%j.out
 
 set -euo pipefail
 
@@ -32,7 +32,7 @@ python -m scratch.retrain_euclid_codec \
   --split all \
   --max-entries 0 \
   --batch-size 8 \
-  --epochs 25 \
+  --epochs 30 \
   --lr 1e-5 \
   --resize 96 \
   --crop-size 96 \
@@ -40,8 +40,7 @@ python -m scratch.retrain_euclid_codec \
   --num-workers 0 \
   --max-abs 1000 \
   --grad-clip 1 \
-  --scheduler cosine \
-  --resume-from outputs/retrained_euclid_codec_418848
+  --scheduler cosine 
 
 
 echo "Finished job $SLURM_JOB_ID at $(date)"

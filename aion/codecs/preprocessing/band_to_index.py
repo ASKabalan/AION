@@ -26,8 +26,8 @@ BAND_CENTER_MAX = {
     "DES-R": 15,
     "DES-I": 20,
     "DES-Z": 25,
-    "EUCLID-VIS": 4.5,
-    "EUCLID-Y": 10.2,
-    "EUCLID-J": 10.6,
-    "EUCLID-H": 10.7,
+    "EUCLID-VIS": 6, # OLD 4.5  
+    "EUCLID-Y": 15, # OLD 10.2
+    "EUCLID-J": 20, # OLD 10.6
+    "EUCLID-H": 25, # OLD 10.7
 }

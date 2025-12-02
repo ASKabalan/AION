@@ -30,7 +30,7 @@ python -m scratch.generate_embeddings \
   --batch-size 20 \
   --cache-dir /n03data/ronceray/datasets \
   --model-dir /n03data/ronceray/huggingface/aion \
-  --codec-dir /home/ronceray/AION/outputs/retrained_euclid_codec_418845 \
-  --output /n03data/ronceray/embeddings/aion_embeddings_spec_image_with_retrained_codec.pt
+  --codec-dir /home/ronceray/AION/outputs/retrained_euclid_codec_428529 \
+  --output /n03data/ronceray/embeddings/aion_embeddings_spec_image_with_retrained_codec_428529.pt
 
 echo "Finished job $SLURM_JOB_ID at $(date)"

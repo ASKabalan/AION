@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Retrain ImageCodec on raw Euclid VIS/Y/J/H bands (no flux renormalization).
+Retrain ImageCodec on raw Euclid VIS/Y/J/H bands (with flux renormalization to nanomaggies).
 
 Example:
   python -m scratch.retrain_euclid_codec \\
@@ -37,6 +37,16 @@ from typing import List, Optional
 
 BANDS = ["EUCLID-VIS", "EUCLID-Y", "EUCLID-J", "EUCLID-H"]
 
+# Zero points in nJy/ADU (derived from user-provided ZP_nu table)
+# Target is nanomaggies (ZP=22.5 mag, 1 nmgy = 3631 nJy)
+# Scale factor = ZP_nu / 3631.0
+EUCLID_ZP_NU = {
+    "vis_image": 2835.34,
+    "nisp_y_image": 1916.10,
+    "nisp_j_image": 1370.25,
+    "nisp_h_image": 918.35,
+}
+
 
 class EuclidImageDataset(torch.utils.data.Dataset):
     """Wrap EuclidDESIDataset to emit EuclidImage objects."""
@@ -57,12 +67,21 @@ class EuclidImageDataset(torch.utils.data.Dataset):
         sample = self.base[base_idx]
 
         bands = []
-        for key in ("vis_image", "nisp_y_image", "nisp_j_image", "nisp_h_image"):
+        # Map dataset keys to ZP keys
+        keys = ["vis_image", "nisp_y_image", "nisp_j_image", "nisp_h_image"]
+        
+        for key in keys:
             tensor = sample.get(key)
             if tensor is None:
                 raise ValueError(f"Missing band '{key}' at index {base_idx}")
             tensor = tensor.to(torch.float32)
             tensor = torch.nan_to_num(tensor, nan=0.0, posinf=0.0, neginf=0.0)
+            
+            # Apply zero-point scaling to convert to nanomaggies (Legacy Survey scale)
+            zp_nu = EUCLID_ZP_NU[key]
+            scale_factor = zp_nu / 3631.0
+            tensor = tensor * scale_factor
+
             if tensor.ndim == 3 and tensor.shape[0] == 1:
                 tensor = tensor.squeeze(0)
             if tensor.ndim != 2:
