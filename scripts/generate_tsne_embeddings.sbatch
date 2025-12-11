@@ -27,8 +27,8 @@ mkdir -p "$RUN_DIR"
 python -m scratch.visualize_multimodel_embeddings_tsne  \
     --aion-embeddings /n03data/ronceray/embeddings/aion_embeddings_spec_image_with_retrained_codec_428529.pt   \
     --astropt-embeddings /n03data/ronceray/embeddings/astropt_embeddings.pt \
-    --catalog /home/ronceray/AION/DESI_DR1_Euclid_Q1_dataset_catalog_EM.fits \
-    --output-dir "$RUN_DIR/tsne_viz" \
+    --catalog /home/ronceray/AION/DESI_DR1_Euclid_Q1_dataset_catalog_physical_param.fits \
+    --output-dir "$RUN_DIR/tsne_viz_better" \
     --tsne-cache /home/ronceray/AION/outputs/results/tsne_coords.pt  \
     --tsne-preset balanced \
     --all-params \

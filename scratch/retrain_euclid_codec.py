@@ -299,8 +299,21 @@ def main() -> None:
 
     # Unfreeze the projection layers we just padded
     for name, p in codec.named_parameters():
-        if "subsample_in" in name or "subsample_out" in name:
+        if "subsample_in" in name or "subsample_out" in name or "pre_quant_proj" in name or "post_quant_proj" in name:
             p.requires_grad = True
+
+    # Log unfrozen parameters
+    trainable_params = [n for n, p in codec.named_parameters() if p.requires_grad]
+    print(f"[info] Unfrozen parameters: {trainable_params}")
+    print(f"[info] Total trainable parameters: {sum(p.numel() for p in codec.parameters() if p.requires_grad)}")
+
+    # Explicitly freeze biases to prevent degradation of other modalities
+    # This is critical: updating the shared bias shifts activations for ALL modalities,
+    # causing catastrophic forgetting/degradation of existing ones (e.g. HSC).
+    if codec.subsample_in.bias is not None:
+        codec.subsample_in.bias.requires_grad = False
+    if codec.subsample_out.bias is not None:
+        codec.subsample_out.bias.requires_grad = False
 
     codec.train()
 
@@ -332,8 +345,9 @@ def main() -> None:
             with torch.no_grad():
                 t_min = float(tokens.min())
                 t_max = float(tokens.max())
+                n_unique = len(torch.unique(tokens))
             global_step = (epoch - 1) * len(loader) + progress.n
-            print(f"[debug] batch {global_step} tokens range: {t_min} {t_max}")
+            print(f"[debug] batch {global_step} tokens range: {t_min} {t_max}, unique: {n_unique}")
 
 
 

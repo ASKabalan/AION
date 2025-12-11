@@ -1,14 +1,13 @@
 #!/bin/bash
-#SBATCH --job-name=euclid_codec
+#SBATCH --job-name=anomalies_nfs_autoregressiv
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --gres=gpu:1
 #SBATCH --time=40:00:00
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=32G
-#SBATCH --output=slurm_retrain_euclid_codec_%j.out
-#SBATCH --nodelist=n36
-#SBATCH --partition=pscompl
+#SBATCH --output=anomalies_nfs_autoregressive_%j.out
+
 
 set -euo pipefail
 
@@ -27,20 +26,12 @@ python3 --version
 RUN_DIR="outputs/retrained_euclid_codec_${SLURM_JOB_ID}"
 mkdir -p "$RUN_DIR"
 
-python -m scratch.retrain_euclid_codec \
-  --cache-dir /n03data/ronceray/datasets \
-  --split all \
-  --max-entries 0 \
-  --batch-size 32 \
-  --epochs 30 \
-  --lr 1e-5 \
-  --resize 96 \
-  --crop-size 96 \
-  --output "$RUN_DIR" \
-  --num-workers 0 \
-  --max-abs 1000 \
-  --grad-clip 1 \
-  --scheduler cosine 
+python -m scratch.detect_outliers_NFs_autoregressive_astropt   \
+  --input /n03data/ronceray/embeddings/astropt_embeddings.pt     \
+  --output-csv outputs/anomaly_scores_astropt_autoregressive.csv    \
+  --epochs 250    \
+  --num-transforms 8     \
+  --hidden-features 256
 
 
 echo "Finished job $SLURM_JOB_ID at $(date)"
