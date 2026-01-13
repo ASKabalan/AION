@@ -32,9 +32,9 @@ except ImportError as exc:  # pragma: no cover - defensive
 
 
 AION_EMBEDDING_KEYS = [
-    "embedding_hsc_desi",
-    "embedding_hsc",
-    "embedding_spectrum",
+    "aion_embedding_hsc_desi",
+    "aion_embedding_hsc",
+    "aion_embedding_spectrum",
 ]
 
 ASTROPT_EMBEDDING_KEYS = [
@@ -49,7 +49,7 @@ ASTROCLIP_EMBEDDING_KEYS = [
     "embedding_joint",
 ]
 
-DEFAULT_PAIR = "embedding_hsc_desi,embedding_hsc"
+DEFAULT_PAIR = "aion_embedding_hsc_desi,aion_embedding_hsc"
 
 
 def load_records(path: Path) -> list[dict]:

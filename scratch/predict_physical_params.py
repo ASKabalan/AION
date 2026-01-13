@@ -196,20 +196,6 @@ def merge_data(
         
     return np.stack(X_list), np.array(y_list), valid_ids, feature_blocks
 
-def run_shap_analysis(
-    model, 
-    X_train: np.ndarray, 
-    X_test: np.ndarray, 
-    y_test: np.ndarray,
-    y_pred: np.ndarray,
-    feature_blocks: Dict[str, Tuple[int, int]],
-    output_dir: Path,
-    prefix: str
-):
-    except Exception as e:
-        print(f"    SHAP Error: {e}")
-    
-    return {}
 
 def calculate_participation_ratio(shap_values: np.ndarray) -> Tuple[float, float, np.ndarray]:
     """
@@ -380,7 +366,10 @@ def plot_results(results: List[Dict], output_dir: Path):
     # 1. Bar plot of R2 scores
     plot_r2_comparison(df, output_dir)
     
-    # 1.5 Bar plot of Efficiency Metric
+    # 1.5 Bar plot of Participation Ratio (PR)
+    plot_pr_comparison(df, output_dir)
+
+    # 1.6 Bar plot of Efficiency Metric
     plot_efficiency_comparison(df, output_dir)
     
     # 2. Compilation Plot (3 rows x 3 cols grid)
@@ -565,6 +554,52 @@ def plot_efficiency_comparison(df: pd.DataFrame, output_dir: Path):
             
         except Exception as e:
             print(f"Error plotting Efficiency for {param}: {e}")
+
+def plot_pr_comparison(df: pd.DataFrame, output_dir: Path):
+    """Bar chart comparison of Participation Ratio (PR)."""
+    if 'pr' not in df.columns or df['pr'].isnull().all():
+        return
+        
+    sns.set_context("notebook", font_scale=1.2)
+    sns.set_style("whitegrid")
+    
+    unique_params = df['target_param'].unique()
+    
+    modality_map = {
+        "embedding_hsc": "Images", "embedding_images": "Images",
+        "embedding_spectrum": "Spectra", "embedding_spectra": "Spectra",
+        "embedding_hsc_desi": "Joint", "embedding_joint": "Joint"
+    }
+    
+    df['Modality'] = df['embedding_key'].apply(lambda k: modality_map.get(k, k))
+    
+    for param in unique_params:
+        df_param = df[df['target_param'] == param].copy()
+        if len(df_param) == 0: continue
+        
+        plt.figure(figsize=(12, 6))
+        try:
+            ax = sns.barplot(data=df_param, x="Modality", y="pr", hue="model_dataset", 
+                            order=["Images", "Spectra", "Joint"],
+                            hue_order=["AION", "AstroPT", "AstroCLIP"],
+                            palette=["#1f77b4", "#d62728", "#2ca02c"],
+                            edgecolor="black", alpha=0.9)
+            
+            plt.title(f"Embedding Space Usage (Participation Ratio) for {param}", fontsize=16, fontweight='bold')
+            plt.ylabel("Participation Ratio (Fraction of Dimensions Used)")
+            plt.ylim(0, 1.05) # PR is always between 0 and 1
+            plt.legend(title="Model", bbox_to_anchor=(1.05, 1), loc='upper left')
+            
+            for container in ax.containers:
+                ax.bar_label(container, fmt='%.2f', padding=3, fontsize=9)
+                
+            plt.tight_layout()
+            safe_param = param.replace("_", "-")
+            plt.savefig(output_dir / f"pr_comparison_{safe_param}.png", dpi=300)
+            plt.close()
+            
+        except Exception as e:
+            print(f"Error plotting PR for {param}: {e}")
 
 def plot_r2_comparison(df: pd.DataFrame, output_dir: Path):
     """Bar chart comparison of R2 scores."""

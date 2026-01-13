@@ -22,6 +22,7 @@ class LocalCodecManager(CodecManager):
     def __init__(self, repo: str | Path, device: str | torch.device = "cpu") -> None:
         super().__init__(device=device)
         self.repo = Path(repo) if Path(repo).exists() else repo
+        self._codec_cache = {}
 
     @staticmethod
     def _config_path(repo: str | Path, modality: type[Modality]) -> Path:
@@ -33,8 +34,10 @@ class LocalCodecManager(CodecManager):
         with open(path, "r", encoding="utf-8") as fh:
             return json.load(fh)
 
-    @lru_cache
     def _load_codec(self, modality_type: type[Modality]):
+        if modality_type in self._codec_cache:
+            return self._codec_cache[modality_type]
+
         if modality_type not in MODALITY_CODEC_MAPPING:
             raise ValueError(f"No codec mapping found for modality {modality_type}")
         codec_class: CodecType = MODALITY_CODEC_MAPPING[modality_type]
@@ -45,6 +48,7 @@ class LocalCodecManager(CodecManager):
                 config = self._load_config(config_path)
                 repo_ref = str(self.repo)
             else:
+                # print(f"codecs/{modality_type.name}/config.json not found in {self.repo}")
                 config_path = hf_hub_download(
                     HF_REPO_ID, f"codecs/{modality_type.name}/config.json"
                 )
@@ -66,4 +70,5 @@ class LocalCodecManager(CodecManager):
             repo_ref, modality=modality_type, **filtered_config
         )
         codec = codec.eval()
+        self._codec_cache[modality_type] = codec
         return codec
