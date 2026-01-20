@@ -51,9 +51,10 @@ def extract_embeddings(records: Sequence[dict], key: str) -> tuple[np.ndarray, l
         if tensor is None:
             continue
         if isinstance(tensor, torch.Tensor):
-            array = tensor.detach().cpu().numpy()
+            # Force a CPU copy and a numpy copy to break any shared memory storage
+            array = tensor.detach().cpu().numpy().copy()
         else:
-            array = np.asarray(tensor)
+            array = np.asarray(tensor).copy()
         
         # Flatten if needed
         if array.ndim > 1:
@@ -149,6 +150,10 @@ def train_flow(
             total_loss += loss.item() * batch.size(0)
             total_items += batch.size(0)
         avg_loss = total_loss / max(total_items, 1) if total_items > 0 else float("nan")
+        
+        if not np.isfinite(avg_loss):
+            print(f"[error] epoch {epoch:03d}: loss is NaN/inf; stopping training for this key.")
+            break
         if skipped_batches:
             print(
                 f"[warn] epoch {epoch:03d}: skipped {skipped_batches}/{len(loader)} batches "

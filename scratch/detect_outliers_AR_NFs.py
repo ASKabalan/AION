@@ -62,9 +62,10 @@ def extract_embeddings(records: Sequence[dict], key: str) -> tuple[np.ndarray, l
         found_any = True
         
         if isinstance(tensor, torch.Tensor):
-            array = tensor.detach().cpu().numpy()
+            # Force a CPU copy and a numpy copy to break any shared memory storage
+            array = tensor.detach().cpu().numpy().copy()
         else:
-            array = np.asarray(tensor)
+            array = np.asarray(tensor).copy()
         
         # Flatten if needed (e.g. 1, D -> D)
         if array.ndim > 1:
@@ -175,8 +176,12 @@ def train_flow(
         # Update epoch pbar description with latest average loss
         epoch_pbar.set_postfix({"avg_loss": f"{avg_loss:.4f}"})
         
+        if not np.isfinite(avg_loss):
+             tqdm.write(f"[error] Epoch {epoch}: Loss is NaN/Inf. Stopping training for this key.")
+             break
+
         if skipped_batches == len(loader):
-             print(f"[warn] Epoch {epoch}: All batches skipped (NaN/Inf).")
+             tqdm.write(f"[warn] Epoch {epoch}: All batches skipped (NaN/Inf).")
              break
 
         if log_every > 0 and (epoch == 1 or epoch == epochs or epoch % log_every == 0):

@@ -290,7 +290,7 @@ def plot_scatter_panel(
     mask = ~np.isnan(values)
     
     # Use robust normalization for plotting to ensure main structure fills frame
-    norm_coords = normalize_simple(coords)
+    norm_coords = robust_normalize(coords)
     
     mappable = None
     
@@ -381,6 +381,54 @@ def plot_thumbnail_panel(
         spine.set_linewidth(1.5)
         spine.set_color('black')
 
+def plot_similarity_histogram(
+    ax: plt.Axes,
+    values: np.ndarray,
+    title: str,
+    color: str = "gray",
+    bins: int = 50,
+) -> None:
+    # Remove NaNs
+    valid_values = values[~np.isnan(values)]
+    
+    if len(valid_values) == 0:
+        return
+
+    # Plot histogram
+    ax.hist(
+        np.abs(valid_values), 
+        bins=bins, 
+        range=(0, 1), 
+        density=True, 
+        color=color, 
+        alpha=0.7, 
+        edgecolor='none',
+        rasterized=True
+    )
+    
+    # Add statistics lines
+    mean_val = np.mean(np.abs(valid_values))
+    median_val = np.median(np.abs(valid_values))
+    
+    ax.axvline(mean_val, color='black', linestyle='--', linewidth=1.5, label=f'Mean: {mean_val:.2f}')
+    ax.axvline(median_val, color='red', linestyle=':', linewidth=1.5, label=f'Median: {median_val:.2f}')
+    
+    ax.set_title(title, fontsize=16, pad=10)
+    ax.set_xlim(0, 1)
+    
+    # Hide y-axis ticks/labels as density is relative
+    ax.set_yticks([])
+    ax.set_ylabel("Density", fontsize=10)
+    ax.set_xlabel("|Cosine Similarity|", fontsize=10)
+    
+    ax.legend(loc='upper left', fontsize=8, frameon=False)
+    
+    # Add frame
+    for spine in ax.spines.values():
+        spine.set_visible(True)
+        spine.set_linewidth(1.5)
+        spine.set_color('black')
+
 def main(argv: Sequence[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Generate publication combined UMAP figure (AstroPT, AION, AstroCLIP)")
     parser.add_argument("--aion-embeddings", required=True, help="AION .pt file")
@@ -396,11 +444,57 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument("--random-state", type=int, default=42, help="Random state")
     parser.add_argument("--cache-dir", default="/n03data/ronceray/datasets", help="Dataset cache dir")
     parser.add_argument("--hexbin", action="store_true", help="Use hexbin plot instead of scatter (Default: True)")
+    parser.add_argument("--show-similarity", action="store_true", help="Add 3rd row with cosine similarity (Images vs Spectra)")
     parser.add_argument("--no-hexbin", action="store_false", dest="hexbin", help="Disable hexbin plot")
     
     parser.set_defaults(hexbin=True)
     
     args = parser.parse_args(argv)
+
+    # Helper for similarity
+    def compute_cosine_similarity(records):
+        sims = []
+        for rec in records:
+            # Try specific keys often found in these files
+            img = rec.get("embedding_images")
+            spec = rec.get("embedding_spectra")
+
+            # AION specific keys
+            if img is None: img = rec.get("embedding_hsc")
+            if spec is None: spec = rec.get("embedding_spectrum")
+            
+            # If not found, try to look for keys ending in _images/_spectra/_spectrum
+            if img is None:
+                for k in rec.keys():
+                    if k.endswith("_images"):
+                        img = rec[k]
+                        break
+            if spec is None:
+                for k in rec.keys():
+                    if k.endswith("_spectra") or k.endswith("_spectrum"):
+                        spec = rec[k]
+                        break
+            
+            if img is None or spec is None:
+                sims.append(np.nan)
+                continue
+                
+            if hasattr(img, "detach"): img = img.detach().cpu().numpy()
+            else: img = np.array(img)
+                
+            if hasattr(spec, "detach"): spec = spec.detach().cpu().numpy()
+            else: spec = np.array(spec)
+            
+            img = img.flatten()
+            spec = spec.flatten()
+            
+            ni = np.linalg.norm(img)
+            ns = np.linalg.norm(spec)
+            if ni == 0 or ns == 0:
+                sims.append(np.nan)
+            else:
+                sims.append(np.dot(img, spec) / (ni * ns))
+        return np.array(sims)
     
     # 1. Load Data
     print("Loading embeddings...")
@@ -506,6 +600,31 @@ def main(argv: Sequence[str] | None = None) -> None:
         
     print(f"Color scale: [{vmin:.3f}, {vmax:.3f}]")
     
+    # 2b. Compute Similarity if requested
+    val_sim_aion = None
+    val_sim_astro = None
+    val_sim_clip = None
+    vmin_sim, vmax_sim = 0, 1
+    
+    if args.show_similarity:
+        print("Computing cosine similarities...")
+        val_sim_aion = compute_cosine_similarity(aion_recs)
+        val_sim_astro = compute_cosine_similarity(astropt_recs)
+        val_sim_clip = compute_cosine_similarity(astroclip_recs)
+        
+        all_sims = np.concatenate([
+            val_sim_aion[~np.isnan(val_sim_aion)],
+            val_sim_astro[~np.isnan(val_sim_astro)],
+            val_sim_clip[~np.isnan(val_sim_clip)]
+        ])
+        
+        if len(all_sims) > 0:
+            vmin_sim = np.percentile(all_sims, 2)
+            vmax_sim = np.percentile(all_sims, 98)
+            print(f"Similarity Color scale: [{vmin_sim:.3f}, {vmax_sim:.3f}]")
+        else:
+            print("Warning: No valid similarities found.")
+    
     # 3. Process Grid Assignments (Bottom Row)
     print("Assigning to grid...")
     thumbs_aion, cells_aion = assign_to_grid(
@@ -538,9 +657,11 @@ def main(argv: Sequence[str] | None = None) -> None:
         
     # 5. Plot
     print("Plotting...")
-    fig, axes = plt.subplots(2, 3, figsize=(24, 16))
+    rows = 3 if args.show_similarity else 2
+    fig_height = 24 if args.show_similarity else 16
+    fig, axes = plt.subplots(rows, 3, figsize=(24, fig_height))
     
-    # Top Row: Scatter
+    # Top Row: Scatter (Physical Param)
     sc = plot_scatter_panel(
         axes[0, 0], coords_astropt, values_astro, 
         r"\textbf{AstroPT} (Spectra + Images)", vmin, vmax,
@@ -557,7 +678,25 @@ def main(argv: Sequence[str] | None = None) -> None:
         use_hexbin=args.hexbin
     )
     
-    # Bottom Row: Thumbnails
+    # Switch rows if similarity is added? 
+    # Standard: Row 1=Param, Row 2=Thumbnails. 
+    # Requested: Add 3rd line.
+    # Let's put Thumbnails in Row 2 (index 1), Similarity in Row 3 (index 2).
+    # Or Similarity in Row 2, Thumbnails in Row 3?
+    # Keeping Thumbnails at bottom (last row) is often cleanest.
+    # But user asked to "add a 3rd line". 
+    # I will put Similarity in the middle (Row 2), Thumbnails at bottom (Row 3).
+    # Wait, existing code puts Thumbnails in Row 2 (axes[1, ...]).
+    # If I add similarity, I will put it as axes[2, ...] (Row 3).
+    # This matches "Add a 3rd line".
+    
+    thumb_row_idx = 1
+    sim_row_idx = 2
+    
+    # Middle Row: Thumbnails (Original Row 2)
+    # If we want Similarity in the middle, we'd change indices.
+    # Let's append Similarity at the bottom to follow "Add 3rd line" literally.
+    
     plot_thumbnail_panel(
         axes[1, 0], thumbs_astro, cells_astro, samples, 
         "", args.grid_rows, args.grid_cols
@@ -571,9 +710,28 @@ def main(argv: Sequence[str] | None = None) -> None:
         "", args.grid_rows, args.grid_cols
     )
     
-    # Colorbar logic
+    sc_sim = None
+    if args.show_similarity:
+        # Bottom Row: Similarity Histograms
+        # Use different colors for each model if desired, or uniform
+        plot_similarity_histogram(
+            axes[2, 0], val_sim_astro, 
+            "Similarity Distribution", color="C0"
+        )
+        plot_similarity_histogram(
+            axes[2, 1], val_sim_aion, 
+            "Similarity Distribution", color="C1"
+        )
+        plot_similarity_histogram(
+            axes[2, 2], val_sim_clip, 
+            "Similarity Distribution", color="C2"
+        )
+
+    # Colorbars
+    fig.subplots_adjust(right=0.9, wspace=0.1, hspace=0.3) # Increased hspace for labels
+    
+    # 1. Colorbar for Param
     if sc:
-        fig.subplots_adjust(right=0.9, wspace=0.1, hspace=0.1)
         pos_top_right = axes[0, 2].get_position()
         cbar_ax = fig.add_axes([0.92, pos_top_right.ymin, 0.015, pos_top_right.height])
         
@@ -584,6 +742,8 @@ def main(argv: Sequence[str] | None = None) -> None:
         cbar = fig.colorbar(sc, cax=cbar_ax)
         cbar.set_label(label, fontsize=14)
         cbar.solids.set_edgecolor("face")
+
+
 
     Path(args.save).parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(args.save, dpi=600, bbox_inches="tight")

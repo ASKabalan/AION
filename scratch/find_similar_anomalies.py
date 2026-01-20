@@ -223,37 +223,34 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         description="Find and display similar anomalies using embedding cosine similarity."
     )
-    parser.add_argument("--input", required=True, help="Path to embeddings .pt file")
+    parser.add_argument("--input", help="Path to simple embeddings .pt file (legacy)")
+    parser.add_argument("--aion-embeddings", help="Path to AION embeddings .pt file")
+    parser.add_argument("--astropt-embeddings", help="Path to AstroPT embeddings .pt file")
+    parser.add_argument("--astroclip-embeddings", help="Path to AstroCLIP embeddings .pt file")
     
-    # Allow reading IDs from args OR file provided in args (like the logic in others)
-    # But user specifically asked for "Input is a list of anomalies like : object_id ..."
-    # We'll support direct CLI args for now as per "Input is a list of anomalies" usually implies text or copy-paste
-    # But let's support a file too just in case.
     parser.add_argument("--object_ids", nargs="+", help="List of object IDs to query")
-    parser.add_argument("--csv", nargs="+", help="CSV files containing object_id column (alternative to --object_ids)")
+    parser.add_argument("--csv", nargs="+", help="CSV files containing object_id column")
     
     parser.add_argument("--n-similar", type=int, default=3, help="Number of similar objects to find per query")
     parser.add_argument("--save", type=str, default="similar_anomalies.png", help="Path to save output image")
     parser.add_argument("--split", type=str, default="all", help="Dataset split")
+    parser.add_argument("--smooth", type=float, default=3.0, help="Sigma for Gaussian smoothing of spectrum (default: 3.0)")
     parser.add_argument("--cache-dir", type=str, default="/n03data/ronceray/datasets")
     parser.add_argument("--index", type=str, default=None, help="Optional CSV mapping object_id -> split/index")
 
     args = parser.parse_args(argv)
     
-    # 1. Collect Query IDs
+    # 1. Collect Query IDs (Logic Unchanged)
     query_ids = []
     if args.object_ids:
         query_ids.extend(args.object_ids)
     
     if args.csv:
         csv_paths = [Path(p) for p in args.csv]
-        # limiting limit=None because we want all of them
         from scratch.display_outlier_images import read_object_ids
         file_ids = read_object_ids(csv_paths, limit=None)
         query_ids.extend(file_ids)
         
-    # Remove duplicates but keep order? No, set is better for lookup but we want input order presumably
-    # Let's keep input order, remove dupes
     seen = set()
     unique_query_ids = []
     for q in query_ids:
@@ -267,93 +264,156 @@ def main(argv: Sequence[str] | None = None) -> None:
         
     print(f"Querying for {len(query_ids)} objects...")
 
-    # 2. Load Embeddings
-    records = load_records(Path(args.input))
-    matrices, all_ids = get_embedding_matrices(records)
-    
-    # 3. Process each embedding type
+    # Define tasks: (Model Name, Path)
+    tasks = []
+    if args.input:
+        tasks.append(("Generic", Path(args.input)))
+    if args.aion_embeddings:
+        tasks.append(("AION", Path(args.aion_embeddings)))
+    if args.astropt_embeddings:
+        tasks.append(("AstroPT", Path(args.astropt_embeddings)))
+    if args.astroclip_embeddings:
+        tasks.append(("AstroCLIP", Path(args.astroclip_embeddings)))
+        
+    if not tasks:
+        raise SystemExit("No embedding files provided! Use --aion-embeddings, --astropt-embeddings, etc.")
+
+    # Shared Dataset
     dataset = None 
-    
-    for key, embedding_matrix in matrices.items():
-        print(f"\nProcessing embedding type: {key}")
+    all_annotated_samples = []
+    collected_labels = []
+
+    for model_name, path in tasks:
+        print(f"\n=== Processing Model: {model_name} ===")
+        print(f"Loading from {path}...")
         
-        # Clean up suffix for filename
-        # e.g. embedding_images -> images
-        suffix = key.replace("embedding_", "")
-        
-        # Determine save path
-        base_save = Path(args.save)
-        stem = base_save.stem
-        # if stem already has the suffix don't add it? 
-        # But we want to distinguish.
-        # simpler: just append suffix
-        new_filename = f"{stem}_{suffix}{base_save.suffix}"
-        save_path = base_save.parent / new_filename
-        
-        # Find Neighbors
-        ordered_ids = find_neighbors(query_ids, all_ids, embedding_matrix, args.n_similar)
-        
-        if not ordered_ids:
-            print(f"No neighbors found for {key}, skipping.")
+        try:
+            records = load_records(path)
+            matrices, all_ids = get_embedding_matrices(records)
+        except Exception as e:
+            print(f"Error loading {model_name}: {e}")
             continue
-            
-        print(f"Loading display data for {len(ordered_ids)} objects...")
+
+        # Force specific order if known? 
+        # For AION: Image, Spectrum, Joint
+        # For AstroPT/Clip: Image, Spectrum, Joint
         
-        if args.index:
-            index_map = load_index(Path(args.index))
-            samples = collect_samples_with_index(
-                cache_dir=args.cache_dir,
-                object_ids=ordered_ids,
-                index_map=index_map,
-                verbose=True,
-            )
-        else:
-            if dataset is None:
-                 dataset = EuclidDESIDataset(split=args.split, cache_dir=args.cache_dir)
-            samples = collect_samples(dataset, ordered_ids, verbose=True)
+        # Sort keys to ensure consistent order: Image -> Spec -> Joint
+        # Custom sort function
+        def key_sort(k):
+             k = k.lower()
+             if "image" in k or "hsc" in k and "desi" not in k: return 0
+             if "spectr" in k: return 1
+             if "joint" in k or "hsc_desi" in k: return 2
+             return 99
+
+        sorted_keys = sorted(matrices.keys(), key=key_sort)
+
+        for key in sorted_keys:
+            embedding_matrix = matrices[key]
             
-        # Verify alignment
-        sample_map = {str(s["object_id"]): s for s in samples}
-        final_samples = []
-        files_missing = 0
-        for oid in ordered_ids:
-            if oid in sample_map:
-                final_samples.append(sample_map[oid])
+            # Label Handling
+            suffix = key.replace("embedding_", "")
+            
+            # Map suffix to pretty name
+            type_label_map = {
+                "images": "Image",
+                "hsc": "Image",
+                "spectra": "Spectrum",
+                "spectrum": "Spectrum",
+                "joint": "Joint",
+                "hsc_desi": "Joint",
+                "hsc_desi_computed": "Joint"
+            }
+            type_pretty = type_label_map.get(suffix, suffix.capitalize())
+            full_label = f"{model_name}\n{type_pretty}"
+            
+            print(f"  -> Modality: {type_pretty} ({key})")
+            
+            # Determine individual save path (optional, maybe skip individual for multi-mode?)
+            # Let's keep individual saves, but namespaced by model
+            base_save = Path(args.save)
+            stem = base_save.stem
+            model_slug = model_name.lower().replace(" ", "")
+            new_filename = f"{stem}_{model_slug}_{suffix}{base_save.suffix}"
+            save_path = base_save.parent / new_filename
+            
+            # Find Neighbors
+            ordered_ids = find_neighbors(query_ids, all_ids, embedding_matrix, args.n_similar)
+            
+            if not ordered_ids:
+                print(f"    No neighbors found, skipping.")
+                continue
+            
+            if args.index:
+                index_map = load_index(Path(args.index))
+                samples = collect_samples_with_index(
+                    cache_dir=args.cache_dir,
+                    object_ids=ordered_ids,
+                    index_map=index_map,
+                    verbose=False # Reduce spam
+                )
             else:
-                print(f"Warning: Object {oid} data not found in dataset. Using placeholder.")
-                final_samples.append({
-                    "object_id": oid, 
-                    "image": np.zeros((64, 64, 3), dtype=np.uint8), # Dummay
-                    "redshift": None 
-                })
-                files_missing += 1
+                if dataset is None:
+                     dataset = EuclidDESIDataset(split=args.split, cache_dir=args.cache_dir)
+                samples = collect_samples(dataset, ordered_ids, verbose=False)
                 
-        if files_missing > 0:
-            print(f"Warning: {files_missing} objects missing data.")
+            # Alignment & Placeholder Logic
+            sample_map = {str(s["object_id"]): s for s in samples}
+            final_samples = []
+            for oid in ordered_ids:
+                if oid in sample_map:
+                    final_samples.append(sample_map[oid])
+                else:
+                     final_samples.append({
+                        "object_id": oid, 
+                        "image": np.zeros((64, 64, 3), dtype=np.uint8),
+                        "redshift": None 
+                    })
 
-        # Annotate samples for visualization
-        # Column 0 is Query, others are Neighbors
-        cols = args.n_similar + 1
-        annotated_samples = []
-        for i, s in enumerate(final_samples):
-            # Create a shallow copy to avoid mutating the original if reused (though we don't reuse here)
-            new_s = s.copy()
-            original_id = str(new_s.get("object_id", ""))
+            # Annotate
+            cols = args.n_similar + 1
+            annotated_samples = []
+            for i, s in enumerate(final_samples):
+                new_s = s.copy()
+                original_id = str(new_s.get("object_id", ""))
+                if i % cols == 0:
+                    label_prefix = f"[QUERY]"
+                else:
+                    rank = i % cols
+                    label_prefix = f"[NEIGHBOR {rank}]"
+                new_s["object_id"] = f"{label_prefix} {original_id}"
+                annotated_samples.append(new_s)
+
+            # Plot Individual (Silent)
+            plot_vertical_panels(
+                annotated_samples,
+                cols=cols,
+                save_path=save_path,
+                show=False,
+                smooth_sigma=args.smooth
+            )
             
-            if i % cols == 0:
-                new_s["object_id"] = f"[QUERY] {original_id}"
-            else:
-                rank = i % cols
-                new_s["object_id"] = f"[NEIGHBOR {rank}] {original_id}"
-            annotated_samples.append(new_s)
+            # Collect for Combined
+            all_annotated_samples.extend(annotated_samples)
+            collected_labels.append(full_label)
 
-        # Plot
-        print(f"Generating grid for {key} with {cols} columns...")
+    # 4. Generate Combined Plot
+    if all_annotated_samples:
+        print(f"\nGenerating combined grid across {len(tasks)} models...")
+        base_save = Path(args.save)
+        combined_filename = f"{base_save.stem}_combined{base_save.suffix}"
+        combined_path = base_save.parent / combined_filename
+        
+        cols = args.n_similar + 1
+        
         plot_vertical_panels(
-            annotated_samples,
+            all_annotated_samples,
             cols=cols,
-            save_path=save_path,
-            show=False
+            save_path=combined_path,
+            show=False,
+            row_labels=collected_labels,
+            smooth_sigma=args.smooth
         )
 
 if __name__ == "__main__":

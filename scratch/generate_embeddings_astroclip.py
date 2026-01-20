@@ -96,15 +96,29 @@ class AstroCLIPCollator:
             ]
         }
 
+class DataFrameDataset(torch.utils.data.Dataset):
+    def __init__(self, df: pd.DataFrame):
+        self.df = df
+        # Cache columns to avoid repeated logic in __getitem__
+        self.columns = df.columns.tolist()
+
+    def __len__(self):
+        return len(self.df)
+
+    def __getitem__(self, idx):
+        # Accessing by index and converting to dict manually is faster/cleaner
+        row = self.df.iloc[idx]
+        return {col: row[col] for col in self.columns}
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate AstroCLIP embeddings.")
     parser.add_argument("--checkpoint", required=True, help="Path to fine-tuned AstroCLIP checkpoint (.ckpt).")
-    parser.add_argument("--base-checkpoint", default="hackathon2025/data/astroclip.ckpt", help="Path to original AstroCLIP checkpoint (for architecture init).")
+    parser.add_argument("--base-checkpoint", default="AstroCLIP/hackathon2025/data/astroclip.ckpt", help="Path to original AstroCLIP checkpoint (for architecture init).")
     parser.add_argument("--output-path", required=True, help="Path to save the output embeddings (.pt).")
     parser.add_argument("--cache-dir", type=str, default="/n03data/ronceray/datasets", help="Local Arrow dataset cache dir.")
     parser.add_argument("--split", type=str, default="train", help="Dataset split (train/test).")
     parser.add_argument("--batch-size", type=int, default=32, help="Inference batch size.")
-    parser.add_argument("--num-workers", type=int, default=4, help="Data loading workers.")
+    parser.add_argument("--num-workers", type=int, default=0, help="Data loading workers (default: 0 to save memory).")
     parser.add_argument("--device", type=str, default=None, help="Device (cuda/cpu).")
     parser.add_argument("--max-samples", type=int, default=None, help="Limit number of samples for testing.")
     parser.add_argument("--amp", action="store_true", help="Use Automatic Mixed Precision (AMP).")
@@ -153,7 +167,7 @@ def main():
     base_ckpt = Path(args.base_checkpoint)
     if not base_ckpt.exists():
          # Fallback to absolute path assumption if relative fails
-         base_ckpt = Path("hackathon2025/data/astroclip.ckpt").resolve()
+         base_ckpt = Path("AstroCLIP/hackathon2025/data/astroclip.ckpt").resolve()
          
     model = load_astroclip_model(Path(args.checkpoint), base_ckpt, device)
 
@@ -181,12 +195,11 @@ def main():
     # Note: image_size=144 is standard for AstroCLIP
     dataset_df = convert_dataset_to_astroclip_format(df, image_size=144)
     
-    # Create a simple list-based dataset
-    # Each row is a dict: {'image': ..., 'spectrum': ..., 'object_id': ...}
-    data_list = dataset_df.to_dict('records')
+    # Create a memory-efficient dataset wrapper
+    dataset = DataFrameDataset(dataset_df)
     
     loader = DataLoader(
-        data_list,
+        dataset,
         batch_size=args.batch_size,
         shuffle=False,
         num_workers=args.num_workers,
@@ -195,7 +208,7 @@ def main():
 
     records = []
     
-    print(f"Starting inference on {len(data_list)} samples...")
+    print(f"Starting inference on {len(dataset)} samples...")
     
     with torch.no_grad():
         with torch.amp.autocast('cuda', enabled=args.amp) if device.type == 'cuda' else torch.no_grad(): # harmless context if cpu
