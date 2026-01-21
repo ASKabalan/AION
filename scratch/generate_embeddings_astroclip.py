@@ -110,6 +110,20 @@ class DataFrameDataset(torch.utils.data.Dataset):
         row = self.df.iloc[idx]
         return {col: row[col] for col in self.columns}
 
+def _normalise_spectrum(tensor: torch.Tensor, mode: str) -> torch.Tensor:
+    if mode == "none":
+        return tensor
+    if mode == "zscore":
+        mean = tensor.mean()
+        std = tensor.std(unbiased=False).clamp(min=1e-6)
+        return (tensor - mean) / std
+    if mode == "minmax":
+        min_val = tensor.min()
+        max_val = tensor.max()
+        scale = (max_val - min_val).clamp(min=1e-6)
+        return (tensor - min_val) / scale
+    raise ValueError(f"Mode de normalisation inconnu: {mode}")
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate AstroCLIP embeddings.")
     parser.add_argument("--checkpoint", required=True, help="Path to fine-tuned AstroCLIP checkpoint (.ckpt).")
@@ -122,6 +136,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--device", type=str, default=None, help="Device (cuda/cpu).")
     parser.add_argument("--max-samples", type=int, default=None, help="Limit number of samples for testing.")
     parser.add_argument("--amp", action="store_true", help="Use Automatic Mixed Precision (AMP).")
+    parser.add_argument(
+        "--spectrum-norm",
+        choices=["zscore", "minmax", "none"],
+        default="none",
+        help="Normalisation appliquée aux spectres avant l'encodage.",
+    )
     return parser.parse_args()
 
 def load_astroclip_model(checkpoint_path: Path, base_checkpoint_path: Path, device: torch.device) -> AstroClipModel:
@@ -249,6 +269,13 @@ def main():
                 elif current_length > target_length:
                     spectrum_input = spectrum_input[..., :target_length]
                 
+                # Apply normalization per sample (consistent with training data loader)
+                if args.spectrum_norm != "none":
+                    normalized_list = []
+                    for i in range(spectrum_input.shape[0]):
+                        normalized_list.append(_normalise_spectrum(spectrum_input[i], args.spectrum_norm))
+                    spectrum_input = torch.stack(normalized_list)
+
                 # Now unsqueeze to add channel dimension at the end -> (B, L, 1)
                 # Check dimensions first
                 if spectrum_input.ndim == 2:

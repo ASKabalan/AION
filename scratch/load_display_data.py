@@ -133,7 +133,10 @@ class EuclidDESIDataset(torch.utils.data.Dataset):
                 f"Loaded EuclidDESIDataset with splits={self.splits} total_samples={len(self.dataset)}"
             )
             print(f"Per-split sizes: {per_split_sizes}")
-            preview = [self.dataset[i]["object_id"] for i in range(min(3, len(self.dataset)))]
+            preview = [
+                (self.dataset[i].get("object_id") or self.dataset[i].get("targetid")) 
+                for i in range(min(3, len(self.dataset)))
+            ]
             print(f"Object ID preview: {preview}")
 
     def __len__(self):

@@ -211,8 +211,8 @@ def assign_to_grid(
     if grid_rows <= 0 or grid_cols <= 0 or coords.size == 0:
         return [], []
 
-    # Robust normalization to fill the grid effectively
-    norm_coords = normalize_simple(coords)
+    # Robust normalization to fill the grid effectively (matching scatter plot view)
+    norm_coords = robust_normalize(coords)
     norm_x = norm_coords[:, 0]
     norm_y = norm_coords[:, 1]
 
@@ -333,7 +333,7 @@ def plot_scatter_panel(
     ax.set_title(title, fontsize=16, pad=10)
     ax.set_xticks([])
     ax.set_yticks([])
-    ax.set_aspect('equal')
+    ax.set_aspect('auto')
     # Set explicit limits since we normalized to 0-1
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
@@ -371,7 +371,7 @@ def plot_thumbnail_panel(
     ax.set_title(title, fontsize=16, pad=10)
     ax.set_xlim(0, grid_cols)
     ax.set_ylim(0, grid_rows)
-    ax.set_aspect('equal')
+    ax.set_aspect('auto')
     
     # Add frame but hide ticks
     ax.set_xticks([])
@@ -658,7 +658,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     # 5. Plot
     print("Plotting...")
     rows = 3 if args.show_similarity else 2
-    fig_height = 24 if args.show_similarity else 16
+    fig_height = 18 if args.show_similarity else 12
     fig, axes = plt.subplots(rows, 3, figsize=(24, fig_height))
     
     # Top Row: Scatter (Physical Param)
@@ -693,6 +693,15 @@ def main(argv: Sequence[str] | None = None) -> None:
     thumb_row_idx = 1
     sim_row_idx = 2
     
+    # ADD ROW TITLES
+    # We place text relative to first axes of each row
+    # Row 1: Latent Space
+    axes[0, 0].text(-0.15, 0.5, "Latent Space\n(Colored by Param)", transform=axes[0, 0].transAxes, 
+                    rotation=90, va='center', ha='right', fontsize=18, fontweight='bold')
+    # Row 2: Thumbnails
+    axes[1, 0].text(-0.15, 0.5, "Representative\nThumbnails", transform=axes[1, 0].transAxes, 
+                    rotation=90, va='center', ha='right', fontsize=18, fontweight='bold')
+                    
     # Middle Row: Thumbnails (Original Row 2)
     # If we want Similarity in the middle, we'd change indices.
     # Let's append Similarity at the bottom to follow "Add 3rd line" literally.
@@ -712,23 +721,27 @@ def main(argv: Sequence[str] | None = None) -> None:
     
     sc_sim = None
     if args.show_similarity:
+        # Row 3: Similarity
+        axes[2, 0].text(-0.15, 0.5, "Cosine Similarity\n(Images vs Spectra)", transform=axes[2, 0].transAxes, 
+                        rotation=90, va='center', ha='right', fontsize=18, fontweight='bold')
+        
         # Bottom Row: Similarity Histograms
         # Use different colors for each model if desired, or uniform
         plot_similarity_histogram(
             axes[2, 0], val_sim_astro, 
-            "Similarity Distribution", color="C0"
+            "", color="C0" # Removed title to avoid overlap
         )
         plot_similarity_histogram(
             axes[2, 1], val_sim_aion, 
-            "Similarity Distribution", color="C1"
+            "", color="C1"
         )
         plot_similarity_histogram(
             axes[2, 2], val_sim_clip, 
-            "Similarity Distribution", color="C2"
+            "", color="C2"
         )
 
     # Colorbars
-    fig.subplots_adjust(right=0.9, wspace=0.1, hspace=0.3) # Increased hspace for labels
+    fig.subplots_adjust(left=0.1, right=0.9, wspace=0.1, hspace=0.2) # Increased hspace for titles, added left margin
     
     # 1. Colorbar for Param
     if sc:
